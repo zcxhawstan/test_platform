@@ -1,0 +1,29 @@
+[project]
+name = "Mytest_Platform"
+version = "0.1.0"
+description = "Django web application"
+authors = [
+    {name = "Hawstan", email = "hawstan@163.com"},
+]
+dependencies = ["django>=5.2.12"]
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+
+[tool.pdm]
+distribution = false
+
+[tool.pdm.scripts]
+init = { composite = [
+    "makeM",
+    "M",
+    "createadmin",
+]}
+
+makeM = 'python manage.py makemigrations'
+
+M = 'python manage.py migrate'
+
+R = 'python manage.py runserver' # --noreload
+
+T = 'python manage.py test'
