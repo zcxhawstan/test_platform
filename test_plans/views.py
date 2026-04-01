@@ -45,9 +45,17 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            return APIResponse.success(serializer.data)
+            return APIResponse.success({
+                'results': serializer.data,
+                'count': self.paginator.page.paginator.count,
+                'next': self.get_next_link(),
+                'previous': self.get_previous_link()
+            })
         serializer = self.get_serializer(queryset, many=True)
-        return APIResponse.success(serializer.data)
+        return APIResponse.success({
+            'results': serializer.data,
+            'count': len(serializer.data)
+        })
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
