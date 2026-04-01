@@ -23,7 +23,7 @@ class TestTestPlanCRUD:
         authenticated_client.post('/api/testplans/', test_plan_data)
         response = authenticated_client.get('/api/testplans/')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_get_test_plan_detail(self, authenticated_client, test_plan_data):
         create_response = authenticated_client.post('/api/testplans/', test_plan_data)

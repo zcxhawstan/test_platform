@@ -16,6 +16,7 @@ class TestUserRegistration:
         data = {
             'username': 'newuser',
             'password': 'newpass123',
+            'password_confirm': 'newpass123',
             'email': 'newuser@example.com',
             'role': 'tester'
         }
@@ -120,17 +121,19 @@ class TestChangePassword:
     def test_change_password_success(self, authenticated_client, test_user):
         data = {
             'old_password': 'testpass123',
-            'new_password': 'newpass456'
+            'new_password': 'newpass456',
+            'new_password_confirm': 'newpass456'
         }
-        response = authenticated_client.post('/api/auth/change-password/', data)
+        response = authenticated_client.post('/api/auth/change_password/', data)
         assert response.status_code == 200
     
     def test_change_password_wrong_old_password(self, authenticated_client):
         data = {
             'old_password': 'wrongpass',
-            'new_password': 'newpass456'
+            'new_password': 'newpass456',
+            'new_password_confirm': 'newpass456'
         }
-        response = authenticated_client.post('/api/auth/change-password/', data)
+        response = authenticated_client.post('/api/auth/change_password/', data)
         assert response.status_code == 400
 
 
@@ -138,14 +141,14 @@ class TestChangePassword:
 class TestUserList:
     
     def test_get_user_list_as_admin(self, admin_client, test_user):
-        response = admin_client.get('/api/auth/users/')
+        response = admin_client.get('/api/auth/')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_get_user_list_as_normal_user(self, authenticated_client):
-        response = authenticated_client.get('/api/auth/users/')
+        response = authenticated_client.get('/api/auth/')
         assert response.status_code == 403
     
     def test_get_user_list_without_auth(self, api_client):
-        response = api_client.get('/api/auth/users/')
+        response = api_client.get('/api/auth/')
         assert response.status_code == 401

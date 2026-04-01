@@ -31,7 +31,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['register', 'login']:
             return [AllowAny()]
-        elif self.action in ['destroy', 'update_role']:
+        elif self.action in ['destroy', 'update_role', 'list']:
             return [IsAdminUser()]
         return [IsAuthenticated()]
 
@@ -46,7 +46,22 @@ class UserViewSet(viewsets.ModelViewSet):
             return ChangePasswordSerializer
         return UserSerializer
 
-    def create(self, request, *args, **kwargs):
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return APIResponse.success(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return APIResponse.success(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return APIResponse.success(serializer.data)
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
+    def register(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -84,8 +99,13 @@ class UserViewSet(viewsets.ModelViewSet):
         logout(request)
         return APIResponse.success(message='退出成功')
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get', 'put', 'patch'])
     def profile(self, request):
+        if request.method in ['PUT', 'PATCH']:
+            serializer = UserUpdateSerializer(request.user, data=request.data, partial=request.method == 'PATCH')
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return APIResponse.success(serializer.data, '个人信息更新成功')
         serializer = self.get_serializer(request.user)
         return APIResponse.success(serializer.data)
 

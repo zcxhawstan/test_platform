@@ -2,7 +2,7 @@ import request from '@/utils/request'
 
 export const login = (data) => {
   return request({
-    url: '/auth/login/',
+    url: '/auth/users/login/',
     method: 'post',
     data
   })
@@ -10,7 +10,7 @@ export const login = (data) => {
 
 export const register = (data) => {
   return request({
-    url: '/auth/register/',
+    url: '/auth/users/register/',
     method: 'post',
     data
   })
@@ -18,21 +18,21 @@ export const register = (data) => {
 
 export const logout = () => {
   return request({
-    url: '/auth/logout/',
+    url: '/auth/users/logout/',
     method: 'post'
   })
 }
 
 export const getProfile = () => {
   return request({
-    url: '/auth/profile/',
+    url: '/auth/users/profile/',
     method: 'get'
   })
 }
 
 export const updateProfile = (data) => {
   return request({
-    url: '/auth/profile/',
+    url: '/auth/users/profile/',
     method: 'put',
     data
   })
@@ -40,7 +40,7 @@ export const updateProfile = (data) => {
 
 export const changePassword = (data) => {
   return request({
-    url: '/auth/change-password/',
+    url: '/auth/users/change_password/',
     method: 'post',
     data
   })

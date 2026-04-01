@@ -5,6 +5,9 @@ Django settings for Django project.
 from pathlib import Path
 import os
 from datetime import timedelta
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -40,6 +43,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'utils.csrf_middleware.CsrfExemptMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -132,6 +136,18 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
     ],
 }
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
+
+CSRF_COOKIE_HTTPONLY = False
+SESSION_COOKIE_HTTPONLY = False
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",

@@ -3,7 +3,10 @@ Test case management tests.
 """
 
 import pytest
+from django.contrib.auth import get_user_model
 from test_cases.models import TestCase
+
+User = get_user_model()
 
 
 @pytest.mark.django_db
@@ -22,7 +25,7 @@ class TestTestCaseCRUD:
         authenticated_client.post('/api/testcases/', test_case_data)
         response = authenticated_client.get('/api/testcases/')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_get_test_case_detail(self, authenticated_client, test_case_data):
         create_response = authenticated_client.post('/api/testcases/', test_case_data)
@@ -73,25 +76,25 @@ class TestTestCaseFiltering:
         authenticated_client.post('/api/testcases/', test_case_data)
         response = authenticated_client.get('/api/testcases/?module=用户模块')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_filter_by_priority(self, authenticated_client, test_case_data):
         authenticated_client.post('/api/testcases/', test_case_data)
         response = authenticated_client.get('/api/testcases/?priority=high')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_filter_by_status(self, authenticated_client, test_case_data):
         authenticated_client.post('/api/testcases/', test_case_data)
         response = authenticated_client.get('/api/testcases/?status=active')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_search_test_cases(self, authenticated_client, test_case_data):
         authenticated_client.post('/api/testcases/', test_case_data)
         response = authenticated_client.get('/api/testcases/?search=测试用例')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
 
 
 @pytest.mark.django_db

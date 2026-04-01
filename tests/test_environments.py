@@ -51,7 +51,7 @@ class TestEnvironmentCRUD:
         authenticated_client.post('/api/environments/', data)
         response = authenticated_client.get('/api/environments/')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_update_environment_success(self, authenticated_client):
         data = {
@@ -134,7 +134,7 @@ class TestEnvironmentFiltering:
         authenticated_client.post('/api/environments/', data)
         response = authenticated_client.get('/api/environments/?env_type=test')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_filter_by_status(self, authenticated_client):
         data = {
@@ -150,7 +150,7 @@ class TestEnvironmentFiltering:
         authenticated_client.post('/api/environments/', data)
         response = authenticated_client.get('/api/environments/?status=active')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
 
 
 @pytest.mark.django_db

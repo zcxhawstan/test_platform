@@ -22,7 +22,7 @@ class TestDefectCRUD:
         authenticated_client.post('/api/defects/', defect_data)
         response = authenticated_client.get('/api/defects/')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_get_defect_detail(self, authenticated_client, defect_data):
         create_response = authenticated_client.post('/api/defects/', defect_data)
@@ -111,19 +111,19 @@ class TestDefectFiltering:
         authenticated_client.post('/api/defects/', defect_data)
         response = authenticated_client.get('/api/defects/?status=new')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_filter_by_severity(self, authenticated_client, defect_data):
         authenticated_client.post('/api/defects/', defect_data)
         response = authenticated_client.get('/api/defects/?severity=high')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
     
     def test_filter_by_module(self, authenticated_client, defect_data):
         authenticated_client.post('/api/defects/', defect_data)
         response = authenticated_client.get('/api/defects/?module=用户模块')
         assert response.status_code == 200
-        assert len(response.data['data']['results']) >= 1
+        assert len(response.data['data']) >= 1
 
 
 @pytest.mark.django_db

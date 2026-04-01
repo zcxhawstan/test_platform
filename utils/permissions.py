@@ -14,11 +14,12 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 
 class IsAdminUser(permissions.BasePermission):
     def has_permission(self, request, view):
-        return request.user and request.user.is_admin
+        return request.user and request.user.is_authenticated and request.user.is_admin
 
 
 class IsOwnerOrReadOnly(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:
             return True
-        return obj.created_by == request.user or request.user.is_admin
+        owner = getattr(obj, 'created_by', None) or getattr(obj, 'reported_by', None)
+        return owner == request.user or request.user.is_admin

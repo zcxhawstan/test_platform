@@ -34,6 +34,20 @@ class ApiEnvironmentViewSet(viewsets.ModelViewSet):
             return [IsOwnerOrReadOnly()]
         return [IsAuthenticated()]
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return APIResponse.success(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return APIResponse.success(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return APIResponse.success(serializer.data)
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -70,6 +84,20 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
         elif self.action in ['update', 'partial_update']:
             return [IsOwnerOrReadOnly()]
         return [IsAuthenticated()]
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return APIResponse.success(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return APIResponse.success(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return APIResponse.success(serializer.data)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -117,7 +145,22 @@ class ApiTestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['executed_at', 'response_time']
     ordering = ['-executed_at']
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return APIResponse.success(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return APIResponse.success(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return APIResponse.success(serializer.data)
+
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         stats = ApiTestService.get_statistics()
         return APIResponse.success(stats, '统计数据获取成功')
+

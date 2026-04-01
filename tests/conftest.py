@@ -2,16 +2,21 @@
 Test configuration and fixtures.
 """
 
-import pytest
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Django.settings')
+
+import pytest
 import django
+django.setup()
+
 from django.conf import settings
 from django.test import Client
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Django.settings')
-django.setup()
 
 User = get_user_model()
 
@@ -39,6 +44,8 @@ def admin_user(db):
         password='admin123',
         email='admin@example.com'
     )
+    user.role = 'admin'
+    user.save()
     return user
 
 
@@ -60,6 +67,7 @@ def admin_client(api_client, admin_user):
 
 @pytest.fixture
 def test_case_data(test_user):
+    import json
     return {
         'title': '测试用例1',
         'description': '这是一个测试用例',
@@ -67,7 +75,7 @@ def test_case_data(test_user):
         'priority': 'high',
         'status': 'active',
         'preconditions': '用户已登录',
-        'steps': [{'step': '点击登录按钮', 'expected': '显示登录页面'}],
+        'steps': json.dumps([{'step': '点击登录按钮', 'expected': '显示登录页面'}]),
         'expected_result': '成功登录'
     }
 

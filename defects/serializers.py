@@ -13,6 +13,9 @@ class DefectCommentSerializer(serializers.ModelSerializer):
         model = DefectComment
         fields = ['id', 'defect', 'content', 'created_by', 'created_by_name', 'created_at']
         read_only_fields = ['id', 'created_by', 'created_at']
+        extra_kwargs = {
+            'defect': {'required': False}
+        }
 
     def create(self, validated_data):
         validated_data['created_by'] = self.context['request'].user

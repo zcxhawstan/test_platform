@@ -331,6 +331,7 @@ const loadEnvironments = async () => {
     const res = await getEnvironmentList({ page_size: 100 })
     environments.value = res.data.results
   } catch (error) {
+    console.error('加载环境列表失败:', error)
     ElMessage.error('加载环境列表失败')
   } finally {
     envLoading.value = false
@@ -348,6 +349,7 @@ const loadApiTestCases = async () => {
     apiTestCases.value = res.data.results
     casePagination.total = res.data.count
   } catch (error) {
+    console.error('加载用例列表失败:', error)
     ElMessage.error('加载用例列表失败')
   } finally {
     caseLoading.value = false
@@ -364,6 +366,7 @@ const loadExecutions = async () => {
     executions.value = res.data.results
     executionPagination.total = res.data.count
   } catch (error) {
+    console.error('加载执行记录失败:', error)
     ElMessage.error('加载执行记录失败')
   } finally {
     executionLoading.value = false
@@ -510,13 +513,28 @@ const handleCaseSubmit = async () => {
 }
 
 const handleExecuteCase = async (row) => {
+  console.log('开始执行用例:', row)
+  console.log('用例ID:', row.id)
   try {
-    await executeApiTest({ test_case_id: row.id })
+    console.log('准备发送执行请求...')
+    const result = await executeApiTest({ test_case_id: row.id })
+    console.log('执行结果:', result)
     ElMessage.success('执行成功')
     activeTab.value = 'executions'
     loadExecutions()
   } catch (error) {
-    ElMessage.error('执行失败')
+    console.error('执行失败，详细错误:', error)
+    if (error.response) {
+      console.error('响应状态:', error.response.status)
+      console.error('响应数据:', error.response.data)
+      ElMessage.error(`执行失败: ${error.response.data?.message || error.message}`)
+    } else if (error.request) {
+      console.error('请求已发送但无响应:', error.request)
+      ElMessage.error('请求超时或网络错误')
+    } else {
+      console.error('请求配置错误:', error.message)
+      ElMessage.error(`执行失败: ${error.message}`)
+    }
   }
 }
 

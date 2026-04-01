@@ -11,4 +11,5 @@ router.register(r'', TestPlanViewSet, basename='testplan')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('<int:pk>/remove_case/<int:case_id>/', TestPlanViewSet.as_view({'delete': 'remove_case'}), name='testplan-remove-case'),
 ]
