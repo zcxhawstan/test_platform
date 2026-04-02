@@ -27,7 +27,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
-    'django_filters',
+    'django_celery_beat',
+    'django_celery_results',
     'users',
     'test_cases',
     'test_plans',
@@ -35,6 +36,7 @@ INSTALLED_APPS = [
     'api_test',
     'environments',
     'logs',
+    'automation',
 ]
 
 MIDDLEWARE = [
@@ -109,6 +111,17 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Celery 配置
+CELERY_BROKER_URL = 'django-db'
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Asia/Shanghai'
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_SOFT_TIME_LIMIT = 3600
+CELERY_TASK_TIME_LIMIT = 7200
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
@@ -134,6 +147,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5174",
+    "http://localhost:5175",
     "http://127.0.0.1:5174",
     "http://localhost:8080",
     "http://127.0.0.1:8080",

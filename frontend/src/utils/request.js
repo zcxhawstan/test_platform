@@ -28,6 +28,12 @@ request.interceptors.request.use(
 request.interceptors.response.use(
   response => {
     const res = response.data
+    // 检查是否是标准的REST framework分页响应
+    if (res.hasOwnProperty('count') && res.hasOwnProperty('results')) {
+      // 分页响应直接返回
+      return res
+    }
+    // 检查是否是带code字段的响应
     if (res.code !== 200 && res.code !== 201) {
       console.error('API响应错误:', res)
       ElMessage.error(res.message || '请求失败')

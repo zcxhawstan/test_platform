@@ -65,6 +65,24 @@ const routes = [
         name: 'Logs',
         component: () => import('@/views/Logs.vue'),
         meta: { title: '日志管理' }
+      },
+      {
+        path: 'automation/tasks',
+        name: 'AutomationTasks',
+        component: () => import('@/views/AutomationTasks.vue'),
+        meta: { title: '自动化任务' }
+      },
+      {
+        path: 'automation/environments',
+        name: 'AutomationEnvironments',
+        component: () => import('@/views/AutomationEnvironments.vue'),
+        meta: { title: '环境配置' }
+      },
+      {
+        path: 'automation/executions',
+        name: 'AutomationExecutions',
+        component: () => import('@/views/AutomationExecutions.vue'),
+        meta: { title: '执行历史' }
       }
     ]
   }

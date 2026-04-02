@@ -12,44 +12,63 @@
         active-text-color="#409EFF"
       >
         <el-menu-item index="/dashboard">
-          <el-icon><Dashboard /></el-icon>
+          <el-icon><ElIcons.HomeFilled /></el-icon>
           <span>仪表盘</span>
         </el-menu-item>
         
         <el-menu-item index="/users">
-          <el-icon><User /></el-icon>
+          <el-icon><ElIcons.User /></el-icon>
           <span>用户管理</span>
         </el-menu-item>
         
         <el-menu-item index="/testcases">
-          <el-icon><Document /></el-icon>
+          <el-icon><ElIcons.Document /></el-icon>
           <span>测试用例</span>
         </el-menu-item>
         
         <el-menu-item index="/testplans">
-          <el-icon><Calendar /></el-icon>
+          <el-icon><ElIcons.Calendar /></el-icon>
           <span>测试计划</span>
         </el-menu-item>
         
         <el-menu-item index="/defects">
-          <el-icon><Warning /></el-icon>
+          <el-icon><ElIcons.Warning /></el-icon>
           <span>缺陷管理</span>
         </el-menu-item>
         
         <el-menu-item index="/apitest">
-          <el-icon><Connection /></el-icon>
+          <el-icon><ElIcons.Connection /></el-icon>
           <span>接口测试</span>
         </el-menu-item>
         
         <el-menu-item index="/environments">
-          <el-icon><Setting /></el-icon>
+          <el-icon><ElIcons.Setting /></el-icon>
           <span>环境管理</span>
         </el-menu-item>
         
         <el-menu-item index="/logs">
-          <el-icon><DocumentCopy /></el-icon>
+          <el-icon><ElIcons.DocumentCopy /></el-icon>
           <span>日志管理</span>
         </el-menu-item>
+        
+        <el-sub-menu index="/automation">
+          <template #title>
+            <el-icon><ElIcons.Document /></el-icon>
+            <span>自动化测试</span>
+          </template>
+          <el-menu-item index="/automation/tasks">
+            <el-icon><ElIcons.Calendar /></el-icon>
+            <span>自动化任务</span>
+          </el-menu-item>
+          <el-menu-item index="/automation/environments">
+            <el-icon><ElIcons.Setting /></el-icon>
+            <span>环境配置</span>
+          </el-menu-item>
+          <el-menu-item index="/automation/executions">
+            <el-icon><ElIcons.DocumentCopy /></el-icon>
+            <span>执行历史</span>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
     
@@ -90,6 +109,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import * as ElIcons from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()

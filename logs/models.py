@@ -39,7 +39,7 @@ class OperationLog(models.Model):
     request_body = models.JSONField(default=dict, verbose_name='请求体')
     response_status = models.IntegerField(verbose_name='响应状态码')
     response_body = models.JSONField(default=dict, verbose_name='响应体')
-    ip_address = models.GenericIPAddressField(verbose_name='IP地址')
+    ip_address = models.GenericIPAddressField(blank=True, null=True, verbose_name='IP地址')
     user_agent = models.TextField(verbose_name='用户代理')
     execution_time = models.FloatField(verbose_name='执行时间(ms)')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
