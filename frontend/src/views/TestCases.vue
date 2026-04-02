@@ -193,6 +193,7 @@ const loadTestCases = async () => {
     testCases.value = res.data.results
     pagination.total = res.data.count
   } catch (error) {
+    console.error('加载测试用例失败:', error)
     ElMessage.error('加载测试用例失败')
   } finally {
     loading.value = false
@@ -256,6 +257,7 @@ const handleSubmit = async () => {
     dialogVisible.value = false
     loadTestCases()
   } catch (error) {
+    console.error('操作失败:', error)
     ElMessage.error('操作失败')
   } finally {
     submitLoading.value = false

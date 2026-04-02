@@ -291,16 +291,24 @@ const handleSubmit = async () => {
   await formRef.value.validate()
   submitLoading.value = true
   try {
+    // 转换日期格式为YYYY-MM-DD
+    const submitData = {
+      ...form,
+      start_date: form.start_date instanceof Date ? form.start_date.toISOString().split('T')[0] : form.start_date,
+      end_date: form.end_date instanceof Date ? form.end_date.toISOString().split('T')[0] : form.end_date
+    }
+    
     if (isEdit.value) {
-      await updateTestPlan(form.id, form)
+      await updateTestPlan(form.id, submitData)
       ElMessage.success('更新成功')
     } else {
-      await createTestPlan(form)
+      await createTestPlan(submitData)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false
     loadTestPlans()
   } catch (error) {
+    console.error('操作失败:', error)
     ElMessage.error('操作失败')
   } finally {
     submitLoading.value = false

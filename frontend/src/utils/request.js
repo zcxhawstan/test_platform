@@ -9,10 +9,11 @@ const request = axios.create({
 
 request.interceptors.request.use(
   config => {
-    const userStore = useUserStore()
+    // 从localStorage直接获取token，避免pinia上下文问题
+    const token = localStorage.getItem('token')
     // 只有当token存在且不为空时，才添加Authorization头
-    if (userStore.token && userStore.token.trim()) {
-      config.headers.Authorization = `Token ${userStore.token}`
+    if (token && token.trim()) {
+      config.headers.Authorization = `Token ${token}`
     } else {
       // 如果token不存在，删除Authorization头
       delete config.headers.Authorization
