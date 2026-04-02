@@ -101,7 +101,11 @@
               </template>
             </el-table-column>
             <el-table-column prop="response_status_code" label="响应码" width="100" />
-            <el-table-column prop="response_time" label="响应时间(ms)" width="120" />
+            <el-table-column label="响应时间" width="150">
+              <template #default="{ row }">
+                {{ formatResponseTime(row.response_time) }}
+              </template>
+            </el-table-column>
             <el-table-column prop="executed_by_name" label="执行人" width="120" />
             <el-table-column prop="executed_at" label="执行时间" width="180" />
             <el-table-column label="操作" width="100">
@@ -225,7 +229,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="请求URL" :span="2">{{ currentExecution.request_url }}</el-descriptions-item>
         <el-descriptions-item label="响应状态码">{{ currentExecution.response_status_code }}</el-descriptions-item>
-        <el-descriptions-item label="响应时间">{{ currentExecution.response_time }}ms</el-descriptions-item>
+        <el-descriptions-item label="响应时间">{{ formatResponseTime(currentExecution.response_time) }}</el-descriptions-item>
         <el-descriptions-item label="请求头" :span="2">
           <pre>{{ JSON.stringify(currentExecution.request_headers, null, 2) }}</pre>
         </el-descriptions-item>
@@ -446,8 +450,12 @@ const handleDeleteEnv = async (row) => {
   }
 }
 
-const showAddCaseDialog = () => {
+const showAddCaseDialog = async () => {
   isCaseEdit.value = false
+  // 确保环境列表已加载
+  if (environments.value.length === 0) {
+    await loadEnvironments()
+  }
   Object.assign(caseForm, {
     id: null,
     name: '',
@@ -573,6 +581,23 @@ const getExecutionStatusType = (status) => {
 const getExecutionStatusText = (status) => {
   const textMap = { pending: '待执行', running: '执行中', passed: '通过', failed: '失败', error: '错误' }
   return textMap[status] || status
+}
+
+const formatResponseTime = (ms) => {
+  if (!ms) return '0ms'
+  
+  const hours = Math.floor(ms / 3600000)
+  const minutes = Math.floor((ms % 3600000) / 60000)
+  const seconds = Math.floor((ms % 60000) / 1000)
+  const milliseconds = Math.floor(ms % 1000)
+  
+  const parts = []
+  if (hours > 0) parts.push(`${hours.toString().padStart(2, '0')}h`)
+  if (minutes > 0 || hours > 0) parts.push(`${minutes.toString().padStart(2, '0')}m`)
+  if (seconds > 0 || minutes > 0 || hours > 0) parts.push(`${seconds.toString().padStart(2, '0')}s`)
+  parts.push(`${milliseconds.toString().padStart(3, '0')}ms`)
+  
+  return parts.join('.')
 }
 
 onMounted(() => {
