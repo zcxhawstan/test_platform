@@ -68,3 +68,19 @@ export const createUser = (data) => {
     data
   })
 }
+
+export const updateUserStatus = (id, data) => {
+  return request({
+    url: `/auth/users/${id}/`,
+    method: 'put',
+    data
+  })
+}
+
+export const resetPassword = (id, data) => {
+  return request({
+    url: `/auth/users/${id}/reset_password/`,
+    method: 'post',
+    data
+  })
+}

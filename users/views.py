@@ -85,6 +85,13 @@ class UserViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         return APIResponse.created(serializer.data, '用户创建成功')
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=request.method == 'PATCH')
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return APIResponse.success(serializer.data, '用户更新成功')
+
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def register(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -150,3 +157,11 @@ class UserViewSet(viewsets.ModelViewSet):
         user.role = role
         user.save()
         return APIResponse.success(UserSerializer(user).data, '角色更新成功')
+    
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser])
+    def reset_password(self, request, pk=None):
+        user = self.get_object()
+        # 重置密码为默认密码 admin123
+        user.set_password('admin123')
+        user.save()
+        return APIResponse.success(message='密码重置成功')

@@ -22,33 +22,28 @@
             <el-tag :type="getRoleType(row.role)">{{ getRoleText(row.role) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="100">
+        <el-table-column prop="is_active" label="状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'danger'">
-              {{ row.is_active ? '启用' : '禁用' }}
-            </el-tag>
+            <el-switch
+              v-model="row.is_active"
+              active-text="启用"
+              inactive-text="禁用"
+              @change="handleStatusChange(row)"
+              inline-prompt
+              style="--el-switch-on-color: var(--el-color-success); --el-switch-off-color: var(--el-color-danger);"
+            />
           </template>
         </el-table-column>
-        <el-table-column label="密码" width="200">
-          <template #default="{ row }">
-            <el-input v-model="row.password" :type="passwordVisible[row.id] ? 'text' : 'password'" :disabled="true">
-              <template #append>
-                <el-button @click="togglePassword(row.id)" type="text">
-                  <el-icon v-if="!passwordVisible[row.id]"><View /></el-icon>
-                  <el-icon v-else><Hide /></el-icon>
-                </el-button>
-              </template>
-            </el-input>
-          </template>
-        </el-table-column>
+
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150">
+        <el-table-column label="操作" width="220">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+            <el-button type="warning" size="small" @click="handleResetPassword(row)">重置密码</el-button>
             <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -108,7 +103,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { View, Hide } from '@element-plus/icons-vue'
-import { getUserList, deleteUser, createUser } from '@/api/auth'
+import { getUserList, deleteUser, createUser, updateUserStatus, resetPassword } from '@/api/auth'
 
 const loading = ref(false)
 const submitLoading = ref(false)
@@ -248,8 +243,44 @@ const getRoleText = (role) => {
   return textMap[role] || role
 }
 
-const togglePassword = (userId) => {
-  passwordVisible.value[userId] = !passwordVisible.value[userId]
+const handleResetPassword = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确定要将用户 ${row.username} 的密码重置为默认密码 admin123 吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    const response = await resetPassword(row.id, { new_password: 'admin123' })
+    if (response.code === 200) {
+      ElMessage.success('密码重置成功，新密码：admin123')
+    } else {
+      ElMessage.error('密码重置失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('网络错误，请稍后重试')
+      console.error('Reset password error:', error)
+    }
+  }
+}
+
+const handleStatusChange = async (row) => {
+  try {
+    const response = await updateUserStatus(row.id, { is_active: row.is_active })
+    if (response.code === 200) {
+      ElMessage.success(row.is_active ? '用户已启用' : '用户已禁用')
+    } else {
+      // 恢复原状态
+      row.is_active = !row.is_active
+      ElMessage.error('状态更新失败')
+    }
+  } catch (error) {
+    // 恢复原状态
+    row.is_active = !row.is_active
+    ElMessage.error('网络错误，请稍后重试')
+    console.error('Status change error:', error)
+  }
 }
 
 const formatDateTime = (dateString) => {
