@@ -29,7 +29,23 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column label="密码" width="200">
+          <template #default="{ row }">
+            <el-input v-model="row.password" :type="passwordVisible[row.id] ? 'text' : 'password'" :disabled="true">
+              <template #append>
+                <el-button @click="togglePassword(row.id)" type="text">
+                  <el-icon v-if="!passwordVisible[row.id]"><View /></el-icon>
+                  <el-icon v-else><Hide /></el-icon>
+                </el-button>
+              </template>
+            </el-input>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
@@ -61,7 +77,14 @@
         </el-form-item>
         
         <el-form-item label="密码" prop="password" v-if="!isEdit">
-          <el-input v-model="form.password" type="password" />
+          <el-input v-model="form.password" :type="showPassword ? 'text' : 'password'">
+            <template #append>
+              <el-button @click="showPassword = !showPassword" type="text">
+                <el-icon v-if="!showPassword"><View /></el-icon>
+                <el-icon v-else><Hide /></el-icon>
+              </el-button>
+            </template>
+          </el-input>
         </el-form-item>
         
         <el-form-item label="角色" prop="role">
@@ -84,6 +107,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { View, Hide } from '@element-plus/icons-vue'
 import { getUserList, deleteUser, createUser } from '@/api/auth'
 
 const loading = ref(false)
@@ -92,6 +116,8 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const formRef = ref()
 const users = ref([])
+const showPassword = ref(false)
+const passwordVisible = ref({})
 
 const pagination = reactive({
   page: 1,
@@ -168,8 +194,10 @@ const handleSubmit = async () => {
     if (isEdit.value) {
       ElMessage.success('更新成功')
     } else {
-      await createUser(form)
-      ElMessage.success('创建成功')
+      const response = await createUser(form)
+      if (response.code === 201) {
+        ElMessage.success('创建成功')
+      }
     }
     dialogVisible.value = false
     loadUsers()
@@ -218,6 +246,26 @@ const getRoleText = (role) => {
     tester: '普通测试'
   }
   return textMap[role] || role
+}
+
+const togglePassword = (userId) => {
+  passwordVisible.value[userId] = !passwordVisible.value[userId]
+}
+
+const formatDateTime = (dateString) => {
+  if (!dateString) return ''
+  
+  const date = new Date(dateString)
+  if (isNaN(date.getTime())) return ''
+  
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
 onMounted(() => {

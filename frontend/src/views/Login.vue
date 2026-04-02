@@ -45,10 +45,32 @@
         </div>
         
         <div class="form-item">
-          <button class="register-link">没有账号？注册</button>
+          <button class="register-link" @click="handleRegister">没有账号？注册</button>
         </div>
       </div>
     </div>
+    
+    <!-- 注册对话框 -->
+    <el-dialog v-model="registerVisible" title="注册账号" width="400px">
+      <el-form :model="registerForm" label-width="80px">
+        <el-form-item label="用户名">
+          <el-input v-model="registerForm.username" placeholder="请输入用户名" />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="registerForm.password" type="password" placeholder="请输入密码" />
+        </el-form-item>
+        <el-form-item label="确认密码">
+          <el-input v-model="registerForm.password_confirm" type="password" placeholder="请确认密码" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="registerForm.email" placeholder="请输入邮箱" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="registerVisible = false">取消</el-button>
+        <el-button type="primary" :loading="loading" @click="handleRegisterSubmit">注册</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -86,7 +108,14 @@ const handleLogin = async () => {
       ElMessage.error(response.message || '登录失败')
     }
   } catch (error) {
-    ElMessage.error('网络错误，请检查服务器连接')
+    // 检查错误对象中是否包含后端返回的错误信息
+    if (error.response && error.response.data) {
+      ElMessage.error(error.response.data.message || '登录失败')
+    } else if (error.message) {
+      ElMessage.error(error.message)
+    } else {
+      ElMessage.error('网络错误，请检查服务器连接')
+    }
     console.error('Login error:', error)
   } finally {
     loading.value = false
@@ -96,6 +125,53 @@ const handleLogin = async () => {
 const handleKeyUp = (event) => {
   if (event.key === 'Enter') {
     handleLogin()
+  }
+}
+
+const registerVisible = ref(false)
+const registerForm = ref({
+  username: '',
+  password: '',
+  password_confirm: '',
+  email: ''
+})
+
+const handleRegister = () => {
+  registerVisible.value = true
+}
+
+const handleRegisterSubmit = async () => {
+  if (!registerForm.value.username.trim() || !registerForm.value.password.trim() || !registerForm.value.password_confirm.trim() || !registerForm.value.email.trim()) {
+    ElMessage.error('请填写完整注册信息')
+    return
+  }
+  
+  if (registerForm.value.password !== registerForm.value.password_confirm) {
+    ElMessage.error('两次密码不一致')
+    return
+  }
+
+  try {
+    loading.value = true
+    const response = await userStore.register(registerForm.value)
+    
+    if (response.code === 201) {
+      ElMessage.success('注册成功，请登录')
+      registerVisible.value = false
+    } else {
+      ElMessage.error(response.message || '注册失败')
+    }
+  } catch (error) {
+    if (error.response && error.response.data) {
+      ElMessage.error(error.response.data.message || '注册失败')
+    } else if (error.message) {
+      ElMessage.error(error.message)
+    } else {
+      ElMessage.error('网络错误，请检查服务器连接')
+    }
+    console.error('Register error:', error)
+  } finally {
+    loading.value = false
   }
 }
 </script>

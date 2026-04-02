@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { login as loginApi, logout as logoutApi, getProfile } from '@/api/auth'
+import { login as loginApi, logout as logoutApi, getProfile, register as registerApi } from '@/api/auth'
 import router from '@/router'
 
 export const useUserStore = defineStore('user', {
@@ -24,6 +24,12 @@ export const useUserStore = defineStore('user', {
       localStorage.setItem('token', this.token)
       localStorage.setItem('user', JSON.stringify(this.user))
       console.log('存储的用户信息:', JSON.parse(localStorage.getItem('user')))
+      return res
+    },
+    
+    async register(credentials) {
+      const res = await registerApi(credentials)
+      console.log('注册响应:', res)
       return res
     },
     
