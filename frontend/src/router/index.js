@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { ElMessage } from 'element-plus'
 
 const routes = [
   {
@@ -77,11 +78,33 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
   
+  console.log('路由守卫检查:', {
+    to: to.path,
+    token: userStore.token,
+    user: userStore.user,
+    role: userStore.role
+  })
+  
   if (to.meta.requiresAuth && !userStore.token) {
+    console.log('未登录，跳转到登录页')
     next('/login')
   } else if (to.path === '/login' && userStore.token) {
+    console.log('已登录，跳转到首页')
     next('/')
+  } else if (to.path === '/users') {
+    // 检查用户是否为管理员
+    const user = JSON.parse(localStorage.getItem('user') || '{}')
+    console.log('检查用户角色:', user.role)
+    if (user.role !== 'admin') {
+      console.log('非管理员，跳转到首页')
+      ElMessage.error('您没有访问该页面的权限')
+      next('/')
+    } else {
+      console.log('管理员，允许访问')
+      next()
+    }
   } else {
+    console.log('允许访问')
     next()
   }
 })

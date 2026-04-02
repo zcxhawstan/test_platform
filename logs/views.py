@@ -32,8 +32,8 @@ class OperationLogViewSet(viewsets.ReadOnlyModelViewSet):
             return APIResponse.success({
                 'results': serializer.data,
                 'count': self.paginator.page.paginator.count,
-                'next': self.get_next_link(),
-                'previous': self.get_previous_link()
+                'next': self.paginator.get_next_link(),
+                'previous': self.paginator.get_previous_link()
             })
         serializer = self.get_serializer(queryset, many=True)
         return APIResponse.success({
@@ -70,8 +70,8 @@ class ErrorLogViewSet(viewsets.ReadOnlyModelViewSet):
             return APIResponse.success({
                 'results': serializer.data,
                 'count': self.paginator.page.paginator.count,
-                'next': self.get_next_link(),
-                'previous': self.get_previous_link()
+                'next': self.paginator.get_next_link(),
+                'previous': self.paginator.get_previous_link()
             })
         serializer = self.get_serializer(queryset, many=True)
         return APIResponse.success({

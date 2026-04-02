@@ -60,3 +60,11 @@ export const deleteUser = (id) => {
     method: 'delete'
   })
 }
+
+export const createUser = (data) => {
+  return request({
+    url: '/auth/users/',
+    method: 'post',
+    data
+  })
+}

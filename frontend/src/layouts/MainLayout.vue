@@ -86,7 +86,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -97,6 +97,15 @@ const userStore = useUserStore()
 
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => route.meta.title || '仪表盘')
+
+onMounted(async () => {
+  console.log('用户存储状态:', userStore.$state)
+  console.log('localStorage中的用户信息:', JSON.parse(localStorage.getItem('user')))
+  console.log('localStorage中的token:', localStorage.getItem('token'))
+  // 验证token是否有效
+  await userStore.validateToken()
+  console.log('验证token后用户存储状态:', userStore.$state)
+})
 
 const handleLogout = async () => {
   try {

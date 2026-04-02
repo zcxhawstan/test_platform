@@ -10,8 +10,12 @@ const request = axios.create({
 request.interceptors.request.use(
   config => {
     const userStore = useUserStore()
-    if (userStore.token) {
+    // 只有当token存在且不为空时，才添加Authorization头
+    if (userStore.token && userStore.token.trim()) {
       config.headers.Authorization = `Token ${userStore.token}`
+    } else {
+      // 如果token不存在，删除Authorization头
+      delete config.headers.Authorization
     }
     return config
   },
@@ -23,7 +27,7 @@ request.interceptors.request.use(
 request.interceptors.response.use(
   response => {
     const res = response.data
-    if (res.code !== 200) {
+    if (res.code !== 200 && res.code !== 201) {
       console.error('API响应错误:', res)
       ElMessage.error(res.message || '请求失败')
       return Promise.reject(new Error(res.message || '请求失败'))
@@ -37,8 +41,13 @@ request.interceptors.response.use(
       console.error('响应状态码:', status)
       console.error('响应数据:', data)
       if (status === 401) {
+        // 直接清除本地存储，避免循环调用logout接口
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        // 重置用户状态
         const userStore = useUserStore()
-        userStore.logout()
+        userStore.token = ''
+        userStore.user = {}
         window.location.href = '/login'
       } else {
         ElMessage.error(data.message || '请求失败')

@@ -48,14 +48,20 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
+        
+        # 按用户名搜索
+        username = request.query_params.get('username', None)
+        if username:
+            queryset = queryset.filter(username__icontains=username)
+        
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             return APIResponse.success({
                 'results': serializer.data,
                 'count': self.paginator.page.paginator.count,
-                'next': self.get_next_link(),
-                'previous': self.get_previous_link()
+                'next': self.paginator.get_next_link(),
+                'previous': self.paginator.get_previous_link()
             })
         serializer = self.get_serializer(queryset, many=True)
         return APIResponse.success({
@@ -67,6 +73,17 @@ class UserViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return APIResponse.success(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return APIResponse.success(message='用户删除成功')
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return APIResponse.created(serializer.data, '用户创建成功')
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def register(self, request):

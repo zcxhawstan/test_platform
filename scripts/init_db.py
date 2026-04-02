@@ -20,14 +20,23 @@ def create_superuser():
     email = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
     
     if not User.objects.filter(username=username).exists():
-        User.objects.create_superuser(
+        user = User.objects.create_superuser(
             username=username,
             password=password,
             email=email
         )
+        user.role = 'admin'
+        user.save()
         print(f'超级管理员创建成功: {username}')
     else:
-        print(f'超级管理员已存在: {username}')
+        # 更新已存在的超级管理员角色
+        user = User.objects.get(username=username)
+        if user.role != 'admin':
+            user.role = 'admin'
+            user.save()
+            print(f'超级管理员角色更新为admin: {username}')
+        else:
+            print(f'超级管理员已存在: {username}')
 
 
 def create_test_users():

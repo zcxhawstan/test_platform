@@ -4,6 +4,11 @@
       <template #header>
         <div class="card-header">
           <span>用户管理</span>
+          <div class="search-box">
+            <el-input v-model="searchForm.username" placeholder="请输入用户名" style="width: 200px; margin-right: 10px" />
+            <el-button type="primary" @click="loadUsers">查询</el-button>
+            <el-button @click="resetSearch">重置</el-button>
+          </div>
           <el-button type="primary" @click="showAddDialog">新增用户</el-button>
         </div>
       </template>
@@ -79,7 +84,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserList, deleteUser } from '@/api/auth'
+import { getUserList, deleteUser, createUser } from '@/api/auth'
 
 const loading = ref(false)
 const submitLoading = ref(false)
@@ -92,6 +97,10 @@ const pagination = reactive({
   page: 1,
   size: 20,
   total: 0
+})
+
+const searchForm = reactive({
+  username: ''
 })
 
 const form = reactive({
@@ -116,7 +125,8 @@ const loadUsers = async () => {
   try {
     const res = await getUserList({
       page: pagination.page,
-      page_size: pagination.size
+      page_size: pagination.size,
+      username: searchForm.username
     })
     users.value = res.data.results
     pagination.total = res.data.count
@@ -158,6 +168,7 @@ const handleSubmit = async () => {
     if (isEdit.value) {
       ElMessage.success('更新成功')
     } else {
+      await createUser(form)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false
@@ -184,6 +195,11 @@ const handleDelete = async (row) => {
       ElMessage.error('删除失败')
     }
   }
+}
+
+const resetSearch = () => {
+  searchForm.username = ''
+  loadUsers()
 }
 
 const getRoleType = (role) => {
@@ -216,7 +232,14 @@ onMounted(() => {
 
 .card-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  margin: 0 20px;
 }
 </style>

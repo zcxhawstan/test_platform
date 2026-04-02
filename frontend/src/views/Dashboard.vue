@@ -51,6 +51,7 @@ import { getTestCaseStatistics } from '@/api/testcase'
 import { getTestPlanStatistics } from '@/api/testplan'
 import { getDefectStatistics } from '@/api/defect'
 import { getApiTestStatistics } from '@/api/apitest'
+import { useUserStore } from '@/stores/user'
 
 const testCaseChart = ref()
 const defectChart = ref()
@@ -61,10 +62,17 @@ const stats = ref({
   apiTests: 0
 })
 
+const userStore = useUserStore()
 let testCaseChartInstance = null
 let defectChartInstance = null
 
 const loadStats = async () => {
+  // 只在用户登录后加载统计数据
+  if (!userStore.isLoggedIn) {
+    console.log('用户未登录，跳过加载统计数据')
+    return
+  }
+  
   try {
     const [testCaseRes, testPlanRes, defectRes, apiTestRes] = await Promise.all([
       getTestCaseStatistics(),
