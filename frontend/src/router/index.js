@@ -54,12 +54,7 @@ const routes = [
         component: () => import('@/views/ApiTest.vue'),
         meta: { title: '接口测试' }
       },
-      {
-        path: 'environments',
-        name: 'Environments',
-        component: () => import('@/views/Environments.vue'),
-        meta: { title: '环境管理' }
-      },
+
       {
         path: 'logs',
         name: 'Logs',

@@ -14,7 +14,7 @@ urlpatterns = [
     path('api/testplans/', include('test_plans.urls')),
     path('api/defects/', include('defects.urls')),
     path('api/apitest/', include('api_test.urls')),
-    path('api/environments/', include('environments.urls')),
+
     path('api/logs/', include('logs.urls')),
     path('api/automation/', include('automation.urls')),
 ]

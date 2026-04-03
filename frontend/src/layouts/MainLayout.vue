@@ -41,10 +41,7 @@
           <span>接口测试</span>
         </el-menu-item>
         
-        <el-menu-item index="/environments">
-          <el-icon><ElIcons.Setting /></el-icon>
-          <span>环境管理</span>
-        </el-menu-item>
+
         
         <el-menu-item index="/logs">
           <el-icon><ElIcons.DocumentCopy /></el-icon>
