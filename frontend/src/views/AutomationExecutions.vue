@@ -22,9 +22,11 @@
       
       <el-table :data="executions" v-loading="loading" border>
         <el-table-column prop="id" label="执行ID" width="80" />
-        <el-table-column prop="task" label="任务名称">
+        <el-table-column prop="task" label="任务名称" min-width="180">
           <template #default="{ row }">
-            {{ row.task ? row.task.name : '-' }}
+            <div class="task-name-cell">
+              {{ row.task ? row.task.name : '-' }}
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="environment" label="执行环境" width="150">
@@ -42,13 +44,35 @@
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="start_time" label="开始时间" width="180" />
-        <el-table-column prop="duration" label="执行时长(秒)" width="120" />
-        <el-table-column label="操作" width="250">
+        <el-table-column label="开始时间" width="180">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="handleViewLogs(row)">查看日志</el-button>
-            <el-button type="warning" size="small" @click="handleViewReports(row)">查看报告</el-button>
-            <el-button size="small" @click="handlePreviewReport(row)">预览报告</el-button>
+            {{ formatDateTime(row.start_time) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="duration" label="执行时长(秒)" width="120" />
+        <el-table-column label="操作" width="180">
+          <template #default="{ row }">
+            <el-dropdown>
+              <el-button type="primary" size="small">
+                操作 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="handleViewLogs(row)">
+                    <el-icon><View /></el-icon>
+                    <span>查看日志</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item @click="handleViewReports(row)">
+                    <el-icon><Document /></el-icon>
+                    <span>查看报告</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item @click="handleDownloadReportFromRow(row)">
+                    <el-icon><Download /></el-icon>
+                    <span>下载报告</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -66,12 +90,12 @@
     </el-card>
     
     <!-- 日志查看对话框 -->
-    <el-dialog v-model="logsDialogVisible" title="执行日志" width="800px" height="600px">
+    <el-dialog v-model="logsDialogVisible" title="执行日志" width="900px" height="600px">
       <div class="logs-container" v-loading="logsLoading">
         <div v-if="logs.length === 0" class="empty-logs">暂无日志</div>
         <div v-else class="logs-content">
-          <div v-for="log in logs" :key="log.id" :class="['log-item', `log-${log.level.toLowerCase()}`]">
-            <span class="log-time">{{ log.timestamp }}</span>
+          <div v-for="log in logs" :key="log.id" :class="['log-item', `log-${log.level ? log.level.toLowerCase() : 'info'}`]">
+            <span class="log-time">{{ formatDateTime(log.timestamp) }}</span>
             <span class="log-level">{{ log.level }}</span>
             <span class="log-message">{{ log.message }}</span>
           </div>
@@ -83,21 +107,26 @@
     </el-dialog>
     
     <!-- 报告查看对话框 -->
-    <el-dialog v-model="reportsDialogVisible" title="测试报告" width="800px">
+    <el-dialog v-model="reportsDialogVisible" title="测试报告" width="900px">
       <div class="reports-container" v-loading="reportsLoading">
         <div v-if="reports.length === 0" class="empty-reports">暂无报告</div>
         <div v-else class="reports-content">
-          <el-table :data="reports" border>
+          <el-table :data="reports" border style="width: 100%">
             <el-table-column prop="id" label="报告ID" width="80" />
             <el-table-column prop="report_type" label="报告类型" width="120">
               <template #default="{ row }">
                 <el-tag>{{ getReportTypeText(row.report_type) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="generated_at" label="生成时间" width="180" />
-            <el-table-column label="操作" width="100">
+            <el-table-column label="生成时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.generated_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="200">
               <template #default="{ row }">
                 <el-button type="primary" size="small" @click="handleDownloadReport(row)">下载</el-button>
+                <el-button type="warning" size="small" @click="handlePreviewReportById(row)">预览</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -113,6 +142,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { View, Document, Download, ArrowDown } from '@element-plus/icons-vue'
 import {
   getExecutionList, getExecutionLogs, getExecutionReports, downloadReport, previewReport
 } from '@/api/automation'
@@ -147,14 +177,25 @@ const loadExecutions = async () => {
       task_name: searchForm.task_name,
       status: searchForm.status
     })
-    executions.value = res.results
-    pagination.total = res.count
+    // 确保results是一个数组
+    executions.value = Array.isArray(res.results) ? res.results : []
+    pagination.total = res.count || 0
   } catch (error) {
     ElMessage.error('加载执行历史失败')
+    // 出错时设置为空数组，避免表格渲染错误
+    executions.value = []
   } finally {
     loading.value = false
   }
 }
+
+// 定时刷新执行状态
+setInterval(() => {
+  // 只在页面活跃时刷新
+  if (document.visibilityState === 'visible') {
+    loadExecutions()
+  }
+}, 5000)
 
 const handleViewLogs = async (row) => {
   currentExecution.value = row
@@ -162,11 +203,23 @@ const handleViewLogs = async (row) => {
   logsLoading.value = true
   try {
     const res = await getExecutionLogs(row.id)
-    logs.value = res
+    // 确保对话框仍然可见，避免更新已销毁的DOM
+    if (logsDialogVisible.value) {
+      // 确保返回的是一个数组（处理后端返回的标准格式）
+      logs.value = Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : []
+    }
   } catch (error) {
-    ElMessage.error('加载日志失败')
+    // 确保对话框仍然可见，避免更新已销毁的DOM
+    if (logsDialogVisible.value) {
+      ElMessage.error('加载日志失败')
+      // 出错时设置为空数组，避免表格渲染错误
+      logs.value = []
+    }
   } finally {
-    logsLoading.value = false
+    // 确保对话框仍然可见，避免更新已销毁的DOM
+    if (logsDialogVisible.value) {
+      logsLoading.value = false
+    }
   }
 }
 
@@ -176,18 +229,44 @@ const handleViewReports = async (row) => {
   reportsLoading.value = true
   try {
     const res = await getExecutionReports(row.id)
-    reports.value = res
+    // 确保对话框仍然可见，避免更新已销毁的DOM
+    if (reportsDialogVisible.value) {
+      // 确保返回的是一个数组（处理后端返回的标准格式）
+      reports.value = Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : []
+    }
   } catch (error) {
-    ElMessage.error('加载报告失败')
+    // 确保对话框仍然可见，避免更新已销毁的DOM
+    if (reportsDialogVisible.value) {
+      ElMessage.error('加载报告失败')
+      // 出错时设置为空数组，避免表格渲染错误
+      reports.value = []
+    }
   } finally {
-    reportsLoading.value = false
+    // 确保对话框仍然可见，避免更新已销毁的DOM
+    if (reportsDialogVisible.value) {
+      reportsLoading.value = false
+    }
   }
 }
 
 const handleDownloadReport = async (row) => {
   try {
-    await downloadReport(row.id)
-    ElMessage.success('报告下载已开始')
+    const response = await downloadReport(row.id)
+    // 处理二进制响应
+    if (response instanceof Blob) {
+      // 创建下载链接
+      const url = window.URL.createObjectURL(response)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `report_${row.id}.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      ElMessage.success('报告下载已开始')
+    } else {
+      ElMessage.success('报告下载已开始')
+    }
   } catch (error) {
     ElMessage.error('下载报告失败')
   }
@@ -212,6 +291,54 @@ const handlePreviewReport = async (row) => {
     }
   } catch (error) {
     ElMessage.error('预览报告失败')
+  }
+}
+
+const handlePreviewReportById = async (row) => {
+  try {
+    // 打开报告预览
+    const previewRes = await previewReport(row.id)
+    if (previewRes.report_url) {
+      // 在新窗口打开报告
+      window.open(previewRes.report_url, '_blank')
+    } else {
+      ElMessage.info('报告预览功能开发中')
+    }
+  } catch (error) {
+    ElMessage.error('预览报告失败')
+  }
+}
+
+const handleDownloadReportFromRow = async (row) => {
+  try {
+    // 找到该执行的Allure报告
+    const res = await getExecutionReports(row.id)
+    // 处理后端返回的标准格式
+    const reportsList = Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : []
+    const allureReport = reportsList.find(report => report.report_type === 'allure')
+    if (allureReport) {
+      // 下载报告
+      const response = await downloadReport(allureReport.id)
+      // 处理二进制响应
+      if (response instanceof Blob) {
+        // 创建下载链接
+        const url = window.URL.createObjectURL(response)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `report_${allureReport.id}.zip`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(url)
+        ElMessage.success('报告下载已开始')
+      } else {
+        ElMessage.success('报告下载已开始')
+      }
+    } else {
+      ElMessage.warning('该执行暂无Allure报告')
+    }
+  } catch (error) {
+    ElMessage.error('下载报告失败')
   }
 }
 
@@ -252,6 +379,18 @@ const getReportTypeText = (type) => {
     html: 'HTML报告'
   }
   return textMap[type] || type
+}
+
+const formatDateTime = (dateTimeStr) => {
+  if (!dateTimeStr) return '-'
+  const date = new Date(dateTimeStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
 onMounted(() => {
@@ -337,5 +476,12 @@ onMounted(() => {
   text-align: center;
   color: #909399;
   padding: 40px 0;
+}
+
+.task-name-cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 </style>

@@ -32,6 +32,21 @@ export const deleteEnvironment = (id) => {
   })
 }
 
+export const testEnvironmentConnection = (id) => {
+  return request({
+    url: `/automation/environments/${id}/test_connection/`,
+    method: 'post'
+  })
+}
+
+export const testSSHConnection = (data) => {
+  return request({
+    url: '/automation/environments/test_ssh/',
+    method: 'post',
+    data
+  })
+}
+
 // 自动化任务相关API
 export const getTaskList = (params) => {
   return request({
@@ -113,7 +128,9 @@ export const getReportList = (params) => {
 export const downloadReport = (id) => {
   return request({
     url: `/automation/reports/${id}/download/`,
-    method: 'get'
+    method: 'get',
+    responseType: 'blob',
+    timeout: 60000
   })
 }
 

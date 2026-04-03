@@ -39,7 +39,16 @@
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="Docker容器" width="180">
+          <template #default="{ row }">
+            {{ getDockerContainerName(row) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="handleExecute(row)">执行</el-button>
@@ -72,31 +81,57 @@
           <el-input v-model="form.description" type="textarea" placeholder="请输入任务描述" />
         </el-form-item>
         
-        <el-form-item label="脚本来源" prop="script_source">
-          <el-select v-model="form.script_source">
-            <el-option label="平台内置脚本" value="builtin" />
-            <el-option label="上传脚本" value="upload" />
-            <el-option label="Git仓库" value="git" />
+        <el-form-item label="Git仓库类型" prop="git_type">
+          <el-select v-model="form.git_type" placeholder="请选择Git仓库类型">
+            <el-option label="HTTPS" value="https" />
+            <el-option label="SSH" value="ssh" />
           </el-select>
         </el-form-item>
         
-        <el-form-item label="脚本路径" prop="script_path">
-          <el-input v-model="form.script_path" placeholder="请输入脚本路径" />
-        </el-form-item>
-        
-        <el-form-item label="Git仓库地址" prop="git_repo" v-if="form.script_source === 'git'">
+        <el-form-item label="Git仓库地址" prop="git_repo">
           <el-input v-model="form.git_repo" placeholder="请输入Git仓库地址" />
         </el-form-item>
         
-        <el-form-item label="Git分支" prop="git_branch" v-if="form.script_source === 'git'">
+        <el-form-item label="Git分支" prop="git_branch">
+          <template #label>
+            <div style="display: flex; align-items: center;">
+              Git分支
+              <el-tooltip
+                content="代码将自动拉取到执行机的以下路径：
+/opt/automation/repos/&lt;仓库名称&gt;"
+                placement="top"
+                :effect="'light'"
+                :show-after="300"
+              >
+                <el-icon class="is-warning" style="margin-left: 4px; color: #E6A23C;">
+                  <WarningFilled />
+                </el-icon>
+              </el-tooltip>
+            </div>
+          </template>
           <el-input v-model="form.git_branch" placeholder="请输入Git分支" />
         </el-form-item>
         
-        <el-form-item label="执行命令" prop="execution_command">
-          <el-input v-model="form.execution_command" placeholder="请输入执行命令" />
+        <el-form-item label="脚本路径" prop="script_path">
+          <template #label>
+            <div style="display: flex; align-items: center;">
+              脚本路径
+              <el-tooltip
+                content="相对于Git仓库根目录的脚本路径，例如：test_cases/test_api.py"
+                placement="top"
+                :effect="'light'"
+                :show-after="300"
+              >
+                <el-icon class="is-warning" style="margin-left: 4px; color: #E6A23C;">
+                  <WarningFilled />
+                </el-icon>
+              </el-tooltip>
+            </div>
+          </template>
+          <el-input v-model="form.script_path" placeholder="请输入相对于仓库根目录的脚本路径" />
         </el-form-item>
         
-        <el-form-item label="执行环境" prop="environment">
+        <el-form-item label="执行环境" prop="environment" required>
           <el-select v-model="form.environment" placeholder="请选择执行环境">
             <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id" />
           </el-select>
@@ -136,7 +171,8 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElTooltip, ElIcon } from 'element-plus'
+import { WarningFilled } from '@element-plus/icons-vue'
 import {
   getTaskList, createTask, updateTask, deleteTask, executeTask,
   getEnvironmentList
@@ -162,26 +198,54 @@ const searchForm = reactive({
 })
 
 const form = reactive({
-  id: null,
   name: '',
   description: '',
-  script_source: 'builtin',
-  script_path: '',
+  git_type: 'https',
   git_repo: '',
   git_branch: 'main',
-  execution_command: 'pytest {script} --alluredir=./result',
+  script_path: '',
   environment: null,
   execution_type: 'manual',
   cron_expression: '',
   retry_count: 0,
-  timeout: 1800,
+  timeout: 3600,
   enable_allure: true
 })
 
 const rules = {
   name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
   script_path: [{ required: true, message: '请输入脚本路径', trigger: 'blur' }],
-  execution_command: [{ required: true, message: '请输入执行命令', trigger: 'blur' }]
+  environment: [{ required: true, message: '请选择执行环境', trigger: 'change' }],
+  git_type: [{ required: true, message: '请选择Git仓库类型', trigger: 'change' }],
+  git_repo: [
+    { required: true, message: '请输入Git仓库地址', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (!value) {
+          callback(new Error('请输入Git仓库地址'))
+          return
+        }
+        if (form.git_type === 'https') {
+          // HTTPS格式校验
+          const httpsRegex = /^https:\/\/[\w\-]+(\.[\w\-]+)+([\w\-\.,@?^=%&:/~\+#]*[\w\-\@?^=%&/~\+#])?$/
+          if (!httpsRegex.test(value)) {
+            callback(new Error('请输入有效的HTTPS格式Git仓库地址'))
+            return
+          }
+        } else if (form.git_type === 'ssh') {
+          // SSH格式校验
+          const sshRegex = /^git@[\w\-]+(\.[\w\-]+)+:[\w\-\.]+\/[\w\-\.]+(\.git)?$/
+          if (!sshRegex.test(value)) {
+            callback(new Error('请输入有效的SSH格式Git仓库地址'))
+            return
+          }
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ],
+  git_branch: [{ required: true, message: '请输入Git分支', trigger: 'blur' }]
 }
 
 const dialogTitle = computed(() => isEdit.value ? '编辑任务' : '新增任务')
@@ -219,11 +283,10 @@ const showAddDialog = () => {
     id: null,
     name: '',
     description: '',
-    script_source: 'builtin',
-    script_path: '',
+    git_type: 'https',
     git_repo: '',
     git_branch: 'main',
-    execution_command: 'pytest {script} --alluredir=./result',
+    script_path: '',
     environment: null,
     execution_type: 'manual',
     cron_expression: '',
@@ -236,15 +299,20 @@ const showAddDialog = () => {
 
 const handleEdit = (row) => {
   isEdit.value = true
+  // 自动检测Git仓库类型
+  let gitType = 'https'
+  if (row.git_repo && row.git_repo.startsWith('git@')) {
+    gitType = 'ssh'
+  }
+  
   Object.assign(form, {
     id: row.id,
     name: row.name,
     description: row.description,
-    script_source: row.script_source,
-    script_path: row.script_path,
+    git_type: gitType,
     git_repo: row.git_repo || '',
     git_branch: row.git_branch || 'main',
-    execution_command: row.execution_command,
+    script_path: row.script_path,
     environment: row.environment ? row.environment.id : null,
     execution_type: row.execution_type,
     cron_expression: row.cron_expression || '',
@@ -256,9 +324,9 @@ const handleEdit = (row) => {
 }
 
 const handleSubmit = async () => {
-  await formRef.value.validate()
-  submitLoading.value = true
   try {
+    await formRef.value.validate()
+    submitLoading.value = true
     if (isEdit.value) {
       await updateTask(form.id, form)
       ElMessage.success('任务更新成功')
@@ -269,7 +337,11 @@ const handleSubmit = async () => {
     dialogVisible.value = false
     loadTasks()
   } catch (error) {
-    ElMessage.error('操作失败')
+    console.error('提交错误:', error)
+    // 表单验证失败时，Element Plus会自动显示错误信息，不需要额外处理
+    if (error.message !== '表单验证失败') {
+      ElMessage.error('操作失败')
+    }
   } finally {
     submitLoading.value = false
   }
@@ -281,6 +353,8 @@ const handleExecute = async (row) => {
     ElMessage.success('任务执行已启动')
     // 刷新任务列表
     loadTasks()
+    // 跳转到执行历史页面
+    router.push('/automation/executions')
   } catch (error) {
     ElMessage.error('启动任务失败')
   }
@@ -349,6 +423,30 @@ const getStatusText = (status) => {
     stopped: '已停止'
   }
   return textMap[status] || status
+}
+
+const formatDateTime = (dateTimeStr) => {
+  if (!dateTimeStr) return '-'
+  const date = new Date(dateTimeStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+}
+
+const getDockerContainerName = (row) => {
+  // 检查任务是否已经执行过
+  if (row.status === 'pending') {
+    return '任务执行后显示'
+  }
+  // 生成容器名称（与后端DockerService保持一致）
+  if (row.environment && row.environment.id) {
+    return `automation-${row.environment.id}`
+  }
+  return '任务执行后显示'
 }
 
 onMounted(() => {

@@ -15,9 +15,24 @@ class Environment(models.Model):
     
     name = models.CharField(max_length=100, verbose_name='环境名称')
     environment_type = models.CharField(max_length=20, choices=ENVIRONMENT_TYPES, verbose_name='环境类型')
-    base_url = models.URLField(verbose_name='基础URL')
     variables = models.JSONField(default=dict, verbose_name='环境变量')
     description = models.TextField(blank=True, null=True, verbose_name='环境描述')
+    
+    # 执行机配置
+    executor_ip = models.CharField(max_length=50, blank=True, null=True, verbose_name='执行机IP')
+    executor_port = models.IntegerField(default=22, verbose_name='SSH端口')
+    executor_username = models.CharField(max_length=50, blank=True, null=True, verbose_name='SSH用户名')
+    executor_password = models.CharField(max_length=100, blank=True, null=True, verbose_name='SSH密码')
+    
+    # Docker配置
+    docker_image = models.CharField(max_length=200, default='python:3.9', verbose_name='Docker镜像')
+    docker_container_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='容器名称')
+    docker_ports = models.JSONField(default=list, verbose_name='端口映射')
+    docker_volumes = models.JSONField(default=list, verbose_name='卷映射')
+    
+    # 连接状态
+    is_connected = models.BooleanField(default=False, verbose_name='连接状态')
+    
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='创建人')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
@@ -34,8 +49,6 @@ class Environment(models.Model):
 class AutomationTask(models.Model):
     """自动化任务模型"""
     SCRIPT_SOURCES = (
-        ('builtin', '平台内置脚本'),
-        ('upload', '上传脚本'),
         ('git', 'Git仓库'),
     )
     
@@ -57,9 +70,8 @@ class AutomationTask(models.Model):
     description = models.TextField(blank=True, null=True, verbose_name='任务描述')
     script_source = models.CharField(max_length=20, choices=SCRIPT_SOURCES, verbose_name='脚本来源')
     script_path = models.CharField(max_length=500, verbose_name='脚本路径')
-    git_repo = models.URLField(blank=True, null=True, verbose_name='Git仓库地址')
+    git_repo = models.CharField(max_length=500, blank=True, null=True, verbose_name='Git仓库地址')
     git_branch = models.CharField(max_length=100, default='main', verbose_name='Git分支')
-    execution_command = models.CharField(max_length=500, default='pytest {script} --alluredir=./result', verbose_name='执行命令')
     environment = models.ForeignKey(Environment, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='执行环境')
     execution_type = models.CharField(max_length=20, choices=EXECUTION_TYPES, default='manual', verbose_name='执行方式')
     cron_expression = models.CharField(max_length=100, blank=True, null=True, verbose_name='Cron表达式')
