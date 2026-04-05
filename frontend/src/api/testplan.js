@@ -59,3 +59,11 @@ export const getTestPlanStatistics = () => {
     method: 'get'
   })
 }
+
+export const addCasesToPlan = (planId, data) => {
+  return request({
+    url: `/api/testplans/${planId}/add_cases/`,
+    method: 'post',
+    data
+  })
+}
