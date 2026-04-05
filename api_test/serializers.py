@@ -44,16 +44,22 @@ class ApiTestCaseSerializer(serializers.ModelSerializer):
 class ApiTestExecutionSerializer(serializers.ModelSerializer):
     test_case_name = serializers.CharField(source='test_case.name', read_only=True)
     executed_by_name = serializers.CharField(source='executed_by.username', read_only=True)
+    formatted_response_time = serializers.SerializerMethodField()
 
     class Meta:
         model = ApiTestExecution
         fields = [
             'id', 'test_case', 'test_case_name', 'status', 'request_url',
             'request_headers', 'request_body', 'response_status_code',
-            'response_headers', 'response_body', 'response_time',
+            'response_headers', 'response_body', 'response_time', 'formatted_response_time',
             'error_message', 'executed_by', 'executed_by_name', 'executed_at'
         ]
         read_only_fields = ['id', 'executed_by', 'executed_at']
+
+    def get_formatted_response_time(self, obj):
+        if obj.response_time is not None:
+            return f"{obj.response_time:.2f} ms"
+        return None
 
 
 class ExecuteApiTestSerializer(serializers.Serializer):
