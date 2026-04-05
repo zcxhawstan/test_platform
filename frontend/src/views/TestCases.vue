@@ -17,7 +17,7 @@
           <el-input v-model="filters.module" placeholder="请输入模块" clearable />
         </el-form-item>
         <el-form-item label="优先级">
-          <el-select v-model="filters.priority" placeholder="请选择" clearable>
+          <el-select v-model="filters.priority" placeholder="请选择" clearable style="width: 120px;">
             <el-option label="低" value="low" />
             <el-option label="中" value="medium" />
             <el-option label="高" value="high" />
@@ -25,7 +25,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="filters.status" placeholder="请选择" clearable>
+          <el-select v-model="filters.status" placeholder="请选择" clearable style="width: 120px;">
             <el-option label="草稿" value="draft" />
             <el-option label="激活" value="active" />
             <el-option label="归档" value="archived" />

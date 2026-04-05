@@ -10,7 +10,7 @@
       
       <el-form :inline="true" :model="filters" class="filter-form">
         <el-form-item label="状态">
-          <el-select v-model="filters.status" placeholder="请选择" clearable>
+          <el-select v-model="filters.status" placeholder="请选择" clearable style="width: 120px;">
             <el-option label="新建" value="new" />
             <el-option label="已分配" value="assigned" />
             <el-option label="处理中" value="in_progress" />
@@ -21,7 +21,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="严重程度">
-          <el-select v-model="filters.severity" placeholder="请选择" clearable>
+          <el-select v-model="filters.severity" placeholder="请选择" clearable style="width: 120px;">
             <el-option label="低" value="low" />
             <el-option label="中" value="medium" />
             <el-option label="高" value="high" />
