@@ -163,6 +163,9 @@ frontend/dist/
 frontend/.vite/
 frontend/*.local
 
+# Media files
+media/
+
 # Spyder project settings
 .spyderproject
 .spyproject
