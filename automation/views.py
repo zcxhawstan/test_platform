@@ -132,7 +132,7 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
 
 class AutomationTaskViewSet(viewsets.ModelViewSet):
     """自动化任务视图集"""
-    queryset = AutomationTask.objects.all().order_by('-created_at')
+    queryset = AutomationTask.objects.select_related('environment').order_by('-created_at')
     serializer_class = AutomationTaskSerializer
     permission_classes = [IsAuthenticated]
     
@@ -228,11 +228,75 @@ class AutomationTaskViewSet(viewsets.ModelViewSet):
             return APIResponse.error(message='停止任务失败: ' + str(e))
 
 
-class ExecutionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
+class ExecutionHistoryViewSet(viewsets.ModelViewSet):
     """执行历史视图集"""
     queryset = ExecutionHistory.objects.all().order_by('-created_at')
     serializer_class = ExecutionHistorySerializer
     permission_classes = [IsAuthenticated]
+    
+    def list(self, request, *args, **kwargs):
+        """获取执行历史列表（带分页）"""
+        # 获取分页参数
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 20))
+        task_name = request.query_params.get('task_name', '')
+        status = request.query_params.get('status', '')
+        
+        # 构建查询集
+        queryset = self.get_queryset()
+        
+        # 添加搜索条件
+        if task_name:
+            queryset = queryset.filter(task__name__icontains=task_name)
+        if status:
+            queryset = queryset.filter(status=status)
+        
+        # 计算总数
+        total = queryset.count()
+        
+        # 分页
+        start = (page - 1) * page_size
+        end = start + page_size
+        queryset = queryset[start:end]
+        
+        # 序列化
+        serializer = self.get_serializer(queryset, many=True)
+        
+        # 返回分页响应
+        return APIResponse.success({
+            'count': total,
+            'results': serializer.data,
+            'page': page,
+            'page_size': page_size
+        })
+    
+    def destroy(self, request, *args, **kwargs):
+        """删除执行历史（只有管理员可以删除）"""
+        # 检查用户是否是管理员
+        if not request.user.is_admin:
+            return APIResponse.error(message='权限不足，只有管理员可以删除执行历史')
+        
+        # 获取执行历史对象
+        execution = self.get_object()
+        
+        # 删除相关的日志
+        execution.logs.all().delete()
+        
+        # 删除相关的报告
+        for report in execution.reports.all():
+            # 删除报告文件（如果存在）
+            if os.path.exists(report.report_path):
+                try:
+                    import shutil
+                    shutil.rmtree(report.report_path)
+                except Exception as e:
+                    print(f"删除报告文件失败: {str(e)}")
+            report.delete()
+        
+        # 删除执行历史
+        self.perform_destroy(execution)
+        
+        return APIResponse.success(message='执行历史删除成功')
     
     @action(detail=True, methods=['get'])
     def logs(self, request, pk=None):
@@ -249,6 +313,43 @@ class ExecutionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
         reports = execution.reports.all()
         serializer = ReportSerializer(reports, many=True)
         return APIResponse.success(serializer.data)
+    
+    @action(detail=False, methods=['delete'])
+    def bulk_delete(self, request):
+        """批量删除执行历史（只有管理员可以删除）"""
+        # 检查用户是否是管理员
+        if not request.user.is_admin:
+            return APIResponse.error(message='权限不足，只有管理员可以删除执行历史')
+        
+        # 获取要删除的执行历史ID列表
+        ids = request.data.get('ids', [])
+        if not ids:
+            return APIResponse.error(message='请提供要删除的执行历史ID')
+        
+        # 批量删除
+        try:
+            executions = ExecutionHistory.objects.filter(id__in=ids)
+            for execution in executions:
+                # 删除相关的日志
+                execution.logs.all().delete()
+                
+                # 删除相关的报告
+                for report in execution.reports.all():
+                    # 删除报告文件（如果存在）
+                    if os.path.exists(report.report_path):
+                        try:
+                            import shutil
+                            shutil.rmtree(report.report_path)
+                        except Exception as e:
+                            print(f"删除报告文件失败: {str(e)}")
+                    report.delete()
+                
+                # 删除执行历史
+                execution.delete()
+            
+            return APIResponse.success(message=f'成功删除 {len(executions)} 条执行历史')
+        except Exception as e:
+            return APIResponse.error(message=f'删除执行历史失败: {str(e)}')
 
 
 class ReportViewSet(viewsets.ReadOnlyModelViewSet):
@@ -261,19 +362,60 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
     def download(self, request, pk=None):
         """下载报告"""
         report = self.get_object()
+        import os
         if not os.path.exists(report.report_path):
             return APIResponse.error(message='报告文件不存在')
         
         # 实现文件下载逻辑
         from django.http import FileResponse
+        import zipfile
+        import tempfile
         try:
+            # 创建临时 ZIP 文件
+            temp_zip = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+            temp_zip_path = temp_zip.name
+            temp_zip.close()
+            
+            # 将报告目录压缩成 ZIP 文件
+            with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(report.report_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, report.report_path)
+                        zipf.write(file_path, arcname)
+            
+            # 定义清理函数
+            def cleanup(temp_path):
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+            
+            # 返回 ZIP 文件
             response = FileResponse(
-                open(report.report_path, 'rb'),
+                open(temp_zip_path, 'rb'),
                 as_attachment=True,
-                filename=os.path.basename(report.report_path)
+                filename=f'report_{report.id}.zip'
             )
+            
+            # 添加清理回调
+            response['X-Temp-File'] = temp_zip_path
+            
+            # 在响应完成后清理临时文件
+            from django.db import close_old_connections
+            def post_response_handler(sender, **kwargs):
+                cleanup(temp_zip_path)
+                close_old_connections()
+            
+            from django.core.signals import request_finished
+            request_finished.connect(post_response_handler, weak=False)
+            
             return response
         except Exception as e:
+            # 清理临时文件
+            if 'temp_zip_path' in locals() and os.path.exists(temp_zip_path):
+                os.unlink(temp_zip_path)
             return APIResponse.error(message='下载报告失败: ' + str(e))
     
     @action(detail=True, methods=['get'])
@@ -286,8 +428,9 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
         # 构建报告URL
         report_index = os.path.join(report.report_path, 'index.html')
         if os.path.exists(report_index):
-            # 返回报告URL，前端可以通过iframe或新窗口打开
+            # 重定向到报告的 HTML 页面
+            from django.shortcuts import redirect
             url = '/media/reports/allure/' + str(report.execution.id) + '/index.html'
-            return APIResponse.success(data={'report_url': url}, message='报告预览URL生成成功')
+            return redirect(url)
         else:
             return APIResponse.error(message='报告主文件不存在')

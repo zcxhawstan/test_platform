@@ -2,7 +2,7 @@ import request from '@/utils/request'
 
 export const getOperationLogs = (params) => {
   return request({
-    url: '/logs/operations/',
+    url: '/api/logs/operations/',
     method: 'get',
     params
   })
@@ -10,7 +10,7 @@ export const getOperationLogs = (params) => {
 
 export const getErrorLogs = (params) => {
   return request({
-    url: '/logs/errors/',
+    url: '/api/logs/errors/',
     method: 'get',
     params
   })
@@ -18,14 +18,14 @@ export const getErrorLogs = (params) => {
 
 export const getOperationStatistics = () => {
   return request({
-    url: '/logs/operations/statistics/',
+    url: '/api/logs/operations/statistics/',
     method: 'get'
   })
 }
 
 export const getErrorStatistics = () => {
   return request({
-    url: '/logs/errors/statistics/',
+    url: '/api/logs/errors/statistics/',
     method: 'get'
   })
 }

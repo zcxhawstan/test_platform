@@ -17,11 +17,12 @@ class EnvironmentSerializer(serializers.ModelSerializer):
 class AutomationTaskSerializer(serializers.ModelSerializer):
     """自动化任务序列化器"""
     script_source = serializers.CharField(default='git', read_only=True)
-    environment = serializers.PrimaryKeyRelatedField(queryset=Environment.objects.all())
+    environment = EnvironmentSerializer(read_only=True)
+    environment_id = serializers.PrimaryKeyRelatedField(queryset=Environment.objects.all(), source='environment', write_only=True)
     
     class Meta:
         model = AutomationTask
-        fields = ['id', 'name', 'description', 'script_source', 'script_path', 'git_repo', 'git_branch', 'environment', 'execution_type', 'cron_expression', 'retry_count', 'timeout', 'enable_allure', 'status', 'created_by', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'description', 'script_source', 'script_path', 'git_repo', 'git_branch', 'environment', 'environment_id', 'execution_type', 'cron_expression', 'retry_count', 'timeout', 'enable_allure', 'status', 'created_by', 'created_at', 'updated_at']
         read_only_fields = ['id', 'status', 'created_by', 'created_at', 'updated_at']
 
 
@@ -38,9 +39,14 @@ class ExecutionHistorySerializer(serializers.ModelSerializer):
     environment = EnvironmentSerializer(read_only=True)
     executor = UserSerializer(read_only=True)
     
+    # 添加直接字段，方便前端处理
+    task_name = serializers.CharField(source='task.name', read_only=True)
+    environment_name = serializers.CharField(source='environment.name', read_only=True)
+    executor_username = serializers.CharField(source='executor.username', read_only=True)
+    
     class Meta:
         model = ExecutionHistory
-        fields = ['id', 'task', 'environment', 'executor', 'status', 'start_time', 'end_time', 'duration', 'exit_code', 'created_at']
+        fields = ['id', 'task', 'task_name', 'environment', 'environment_name', 'executor', 'executor_username', 'status', 'start_time', 'end_time', 'duration', 'exit_code', 'created_at']
         read_only_fields = ['id', 'executor', 'start_time', 'end_time', 'duration', 'exit_code', 'created_at']
 
 

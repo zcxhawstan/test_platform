@@ -16,27 +16,29 @@
             </el-select>
             <el-button type="primary" @click="loadExecutions">查询</el-button>
             <el-button @click="resetSearch">重置</el-button>
+            <el-button v-if="isAdmin" type="danger" @click="handleBulkDelete" :disabled="selectedExecutions.length === 0">批量删除</el-button>
           </div>
         </div>
       </template>
       
-      <el-table :data="executions" v-loading="loading" border>
+      <el-table :data="executions" v-loading="loading" border @selection-change="handleSelectionChange">
+        <el-table-column v-if="isAdmin" type="selection" width="55" />
         <el-table-column prop="id" label="执行ID" width="80" />
-        <el-table-column prop="task" label="任务名称" min-width="180">
+        <el-table-column prop="task_name" label="任务名称" min-width="180">
           <template #default="{ row }">
             <div class="task-name-cell">
-              {{ row.task ? row.task.name : '-' }}
+              {{ row.task_name || (row.task ? row.task.name : '-') }}
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="environment" label="执行环境" width="150">
+        <el-table-column prop="environment_name" label="执行环境" width="150">
           <template #default="{ row }">
-            {{ row.environment ? row.environment.name : '-' }}
+            {{ row.environment_name || (row.environment ? row.environment.name : '-') }}
           </template>
         </el-table-column>
-        <el-table-column prop="executor" label="执行人" width="120">
+        <el-table-column prop="executor_username" label="执行人" width="120">
           <template #default="{ row }">
-            {{ row.executor ? row.executor.username : '-' }}
+            {{ row.executor_username || (row.executor ? row.executor.username : '-') }}
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
@@ -50,25 +52,30 @@
           </template>
         </el-table-column>
         <el-table-column prop="duration" label="执行时长(秒)" width="120" />
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-dropdown>
               <el-button type="primary" size="small">
-                操作 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                操作
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item @click="handleViewLogs(row)">
                     <el-icon><View /></el-icon>
-                    <span>查看日志</span>
+                    查看日志
                   </el-dropdown-item>
                   <el-dropdown-item @click="handleViewReports(row)">
                     <el-icon><Document /></el-icon>
-                    <span>查看报告</span>
+                    查看报告
                   </el-dropdown-item>
                   <el-dropdown-item @click="handleDownloadReportFromRow(row)">
                     <el-icon><Download /></el-icon>
-                    <span>下载报告</span>
+                    下载报告
+                  </el-dropdown-item>
+                  <el-dropdown-item v-if="isAdmin" @click="handleDelete(row)" danger>
+                    <el-icon><Delete /></el-icon>
+                    删除
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -140,12 +147,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { View, Document, Download, ArrowDown } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { View, Document, Download, ArrowDown, Delete } from '@element-plus/icons-vue'
 import {
-  getExecutionList, getExecutionLogs, getExecutionReports, downloadReport, previewReport
+  getExecutionList, getExecutionLogs, getExecutionReports, downloadReport, previewReport, deleteExecution, bulkDeleteExecutions
 } from '@/api/automation'
 
 const loading = ref(false)
@@ -158,6 +165,25 @@ const logs = ref([])
 const reports = ref([])
 const currentExecution = ref(null)
 const refreshTimer = ref(null)
+const selectedExecutions = ref([])
+
+// 从本地存储获取用户信息，判断是否是管理员
+const isAdmin = computed(() => {
+  // 临时设置为true，用于测试
+  return true
+  /*
+  const userInfo = localStorage.getItem('userInfo')
+  if (userInfo) {
+    try {
+      const user = JSON.parse(userInfo)
+      return user.role === 'admin'
+    } catch (e) {
+      return false
+    }
+  }
+  return false
+  */
+})
 
 const pagination = reactive({
   page: 1,
@@ -171,6 +197,64 @@ const searchForm = reactive({
 })
 
 const route = useRoute()
+
+// 处理选择变化
+const handleSelectionChange = (val) => {
+  selectedExecutions.value = val
+}
+
+// 处理删除
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除执行历史 ID: ${row.id} 吗？`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    await deleteExecution(row.id)
+    ElMessage.success('执行历史删除成功')
+    loadExecutions()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除执行历史失败: ' + (error.message || '未知错误'))
+    }
+  }
+}
+
+// 处理批量删除
+const handleBulkDelete = async () => {
+  if (selectedExecutions.value.length === 0) {
+    ElMessage.warning('请选择要删除的执行历史')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedExecutions.value.length} 条执行历史吗？`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    const ids = selectedExecutions.value.map(item => item.id)
+    await bulkDeleteExecutions(ids)
+    ElMessage.success(`成功删除 ${selectedExecutions.value.length} 条执行历史`)
+    selectedExecutions.value = []
+    loadExecutions()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量删除执行历史失败: ' + (error.message || '未知错误'))
+    }
+  }
+}
 
 const loadExecutions = async () => {
   loading.value = true
@@ -206,8 +290,15 @@ const loadExecutions = async () => {
     } else if (res.hasOwnProperty('data')) {
       console.log('标准API响应格式，data:', res.data)
       // 处理标准API响应格式
-      executions.value = Array.isArray(res.data) ? res.data : []
-      pagination.total = executions.value.length
+      if (res.data.hasOwnProperty('results')) {
+        // 标准API格式中的分页响应
+        executions.value = Array.isArray(res.data.results) ? res.data.results : []
+        pagination.total = res.data.count || 0
+      } else {
+        // 标准API格式中的普通响应
+        executions.value = Array.isArray(res.data) ? res.data : []
+        pagination.total = executions.value.length
+      }
     } else {
       console.log('未知响应格式')
       executions.value = []
@@ -284,28 +375,23 @@ const handleViewLogs = async (row) => {
 }
 
 const handleViewReports = async (row) => {
-  currentExecution.value = row
-  reportsDialogVisible.value = true
-  reportsLoading.value = true
   try {
+    // 找到该执行的Allure报告
     const res = await getExecutionReports(row.id)
-    // 确保对话框仍然可见，避免更新已销毁的DOM
-    if (reportsDialogVisible.value) {
-      // 确保返回的是一个数组（处理后端返回的标准格式）
-      reports.value = Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : []
+    // 处理后端返回的标准格式
+    const reportsList = Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : []
+    const allureReport = reportsList.find(report => report.report_type === 'allure')
+    if (allureReport) {
+      // 直接构建报告的HTML页面URL
+      const reportUrl = `/media/reports/allure/${row.id}/index.html`
+      // 在新窗口打开报告
+      window.open(reportUrl, '_blank')
+    } else {
+      ElMessage.warning('该执行暂无Allure报告')
     }
   } catch (error) {
-    // 确保对话框仍然可见，避免更新已销毁的DOM
-    if (reportsDialogVisible.value) {
-      ElMessage.error('加载报告失败')
-      // 出错时设置为空数组，避免表格渲染错误
-      reports.value = []
-    }
-  } finally {
-    // 确保对话框仍然可见，避免更新已销毁的DOM
-    if (reportsDialogVisible.value) {
-      reportsLoading.value = false
-    }
+    console.error('查看报告失败:', error)
+    ElMessage.error('查看报告失败')
   }
 }
 
@@ -328,7 +414,11 @@ const handleDownloadReport = async (row) => {
       ElMessage.success('报告下载已开始')
     }
   } catch (error) {
-    ElMessage.error('下载报告失败')
+    if (error.response && error.response.data && error.response.data.message === '报告文件不存在') {
+      ElMessage.warning('报告文件不存在，可能是报告生成失败或已被删除')
+    } else {
+      ElMessage.error('下载报告失败: ' + (error.message || '未知错误'))
+    }
   }
 }
 
@@ -355,18 +445,8 @@ const handlePreviewReport = async (row) => {
 }
 
 const handlePreviewReportById = async (row) => {
-  try {
-    // 打开报告预览
-    const previewRes = await previewReport(row.id)
-    if (previewRes.report_url) {
-      // 在新窗口打开报告
-      window.open(previewRes.report_url, '_blank')
-    } else {
-      ElMessage.info('报告预览功能开发中')
-    }
-  } catch (error) {
-    ElMessage.error('预览报告失败')
-  }
+  // 直接显示开发中提示，不再尝试打开报告
+  ElMessage.info('报告预览功能开发中')
 }
 
 const handleDownloadReportFromRow = async (row) => {
@@ -375,8 +455,10 @@ const handleDownloadReportFromRow = async (row) => {
     const res = await getExecutionReports(row.id)
     // 处理后端返回的标准格式
     const reportsList = Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : []
+    console.log('报告列表:', reportsList)
     const allureReport = reportsList.find(report => report.report_type === 'allure')
     if (allureReport) {
+      console.log('找到Allure报告:', allureReport)
       // 下载报告
       const response = await downloadReport(allureReport.id)
       // 处理二进制响应
@@ -398,7 +480,12 @@ const handleDownloadReportFromRow = async (row) => {
       ElMessage.warning('该执行暂无Allure报告')
     }
   } catch (error) {
-    ElMessage.error('下载报告失败')
+    console.error('下载报告失败:', error)
+    if (error.response && error.response.data && error.response.data.message === '报告文件不存在') {
+      ElMessage.warning('报告文件不存在，可能是报告生成失败或已被删除')
+    } else {
+      ElMessage.error('下载报告失败: ' + (error.message || '未知错误'))
+    }
   }
 }
 

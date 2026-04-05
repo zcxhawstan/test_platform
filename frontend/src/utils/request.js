@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: '',
   timeout: 30000
 })
 
@@ -27,6 +27,12 @@ request.interceptors.request.use(
 
 request.interceptors.response.use(
   response => {
+    // 检查是否是文件下载响应
+    if (response.config.responseType === 'blob' || response.headers['content-type'] && response.headers['content-type'].includes('application/zip')) {
+      // 文件下载响应直接返回
+      return response.data
+    }
+    
     const res = response.data
     // 检查是否是标准的REST framework分页响应
     if (res.hasOwnProperty('count') && res.hasOwnProperty('results')) {

@@ -2,7 +2,7 @@ import request from '@/utils/request'
 
 export const getTestCaseList = (params) => {
   return request({
-    url: '/testcases/',
+    url: '/api/testcases/',
     method: 'get',
     params
   })
@@ -10,7 +10,7 @@ export const getTestCaseList = (params) => {
 
 export const createTestCase = (data) => {
   return request({
-    url: '/testcases/',
+    url: '/api/testcases/',
     method: 'post',
     data
   })
@@ -18,7 +18,7 @@ export const createTestCase = (data) => {
 
 export const updateTestCase = (id, data) => {
   return request({
-    url: `/testcases/${id}/`,
+    url: `/api/testcases/${id}/`,
     method: 'patch',
     data
   })
@@ -26,14 +26,14 @@ export const updateTestCase = (id, data) => {
 
 export const deleteTestCase = (id) => {
   return request({
-    url: `/testcases/${id}/`,
+    url: `/api/testcases/${id}/`,
     method: 'delete'
   })
 }
 
 export const getTestCaseDetail = (id) => {
   return request({
-    url: `/testcases/${id}/`,
+    url: `/api/testcases/${id}/`,
     method: 'get'
   })
 }
@@ -42,7 +42,7 @@ export const importTestCases = (file) => {
   const formData = new FormData()
   formData.append('file', file)
   return request({
-    url: '/testcases/import_excel/',
+    url: '/api/testcases/import_excel/',
     method: 'post',
     data: formData,
     headers: { 'Content-Type': 'multipart/form-data' }
@@ -51,7 +51,7 @@ export const importTestCases = (file) => {
 
 export const exportTestCases = (params) => {
   return request({
-    url: '/testcases/export_excel/',
+    url: '/api/testcases/export_excel/',
     method: 'get',
     params,
     responseType: 'blob'
@@ -60,7 +60,7 @@ export const exportTestCases = (params) => {
 
 export const getTestCaseStatistics = () => {
   return request({
-    url: '/testcases/statistics/',
+    url: '/api/testcases/statistics/',
     method: 'get'
   })
 }

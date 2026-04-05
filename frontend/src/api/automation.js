@@ -3,7 +3,7 @@ import request from '@/utils/request'
 // 环境配置相关API
 export const getEnvironmentList = (params) => {
   return request({
-    url: '/automation/environments/',
+    url: '/api/automation/environments/',
     method: 'get',
     params
   })
@@ -11,7 +11,7 @@ export const getEnvironmentList = (params) => {
 
 export const createEnvironment = (data) => {
   return request({
-    url: '/automation/environments/',
+    url: '/api/automation/environments/',
     method: 'post',
     data
   })
@@ -19,7 +19,7 @@ export const createEnvironment = (data) => {
 
 export const updateEnvironment = (id, data) => {
   return request({
-    url: `/automation/environments/${id}/`,
+    url: `/api/automation/environments/${id}/`,
     method: 'put',
     data
   })
@@ -27,21 +27,21 @@ export const updateEnvironment = (id, data) => {
 
 export const deleteEnvironment = (id) => {
   return request({
-    url: `/automation/environments/${id}/`,
+    url: `/api/automation/environments/${id}/`,
     method: 'delete'
   })
 }
 
 export const testEnvironmentConnection = (id) => {
   return request({
-    url: `/automation/environments/${id}/test_connection/`,
+    url: `/api/automation/environments/${id}/test_connection/`,
     method: 'post'
   })
 }
 
 export const testSSHConnection = (data) => {
   return request({
-    url: '/automation/environments/test_ssh/',
+    url: '/api/automation/environments/test_ssh/',
     method: 'post',
     data
   })
@@ -50,7 +50,7 @@ export const testSSHConnection = (data) => {
 // 自动化任务相关API
 export const getTaskList = (params) => {
   return request({
-    url: '/automation/tasks/',
+    url: '/api/automation/tasks/',
     method: 'get',
     params
   })
@@ -58,7 +58,7 @@ export const getTaskList = (params) => {
 
 export const createTask = (data) => {
   return request({
-    url: '/automation/tasks/',
+    url: '/api/automation/tasks/',
     method: 'post',
     data
   })
@@ -66,7 +66,7 @@ export const createTask = (data) => {
 
 export const updateTask = (id, data) => {
   return request({
-    url: `/automation/tasks/${id}/`,
+    url: `/api/automation/tasks/${id}/`,
     method: 'put',
     data
   })
@@ -74,14 +74,14 @@ export const updateTask = (id, data) => {
 
 export const deleteTask = (id) => {
   return request({
-    url: `/automation/tasks/${id}/`,
+    url: `/api/automation/tasks/${id}/`,
     method: 'delete'
   })
 }
 
 export const executeTask = (id) => {
   return request({
-    url: `/automation/tasks/${id}/execute/`,
+    url: `/api/automation/tasks/${id}/execute/`,
     method: 'post',
     timeout: 60000  // 执行操作需要更长的超时时间
   })
@@ -89,7 +89,7 @@ export const executeTask = (id) => {
 
 export const stopTask = (id) => {
   return request({
-    url: `/automation/tasks/${id}/stop/`,
+    url: `/api/automation/tasks/${id}/stop/`,
     method: 'post'
   })
 }
@@ -97,7 +97,7 @@ export const stopTask = (id) => {
 // 执行历史相关API
 export const getExecutionList = (params) => {
   return request({
-    url: '/automation/executions/',
+    url: '/api/automation/executions/',
     method: 'get',
     params
   })
@@ -105,22 +105,37 @@ export const getExecutionList = (params) => {
 
 export const getExecutionLogs = (id) => {
   return request({
-    url: `/automation/executions/${id}/logs/`,
+    url: `/api/automation/executions/${id}/logs/`,
     method: 'get'
   })
 }
 
 export const getExecutionReports = (id) => {
   return request({
-    url: `/automation/executions/${id}/reports/`,
+    url: `/api/automation/executions/${id}/reports/`,
     method: 'get'
+  })
+}
+
+export const deleteExecution = (id) => {
+  return request({
+    url: `/api/automation/executions/${id}/`,
+    method: 'delete'
+  })
+}
+
+export const bulkDeleteExecutions = (ids) => {
+  return request({
+    url: '/api/automation/executions/bulk_delete/',
+    method: 'delete',
+    data: { ids }
   })
 }
 
 // 报告相关API
 export const getReportList = (params) => {
   return request({
-    url: '/automation/reports/',
+    url: '/api/automation/reports/',
     method: 'get',
     params
   })
@@ -128,7 +143,7 @@ export const getReportList = (params) => {
 
 export const downloadReport = (id) => {
   return request({
-    url: `/automation/reports/${id}/download/`,
+    url: `/api/automation/reports/${id}/download/`,
     method: 'get',
     responseType: 'blob',
     timeout: 60000
@@ -137,7 +152,7 @@ export const downloadReport = (id) => {
 
 export const previewReport = (id) => {
   return request({
-    url: `/automation/reports/${id}/preview/`,
+    url: `/api/automation/reports/${id}/preview/`,
     method: 'get'
   })
 }

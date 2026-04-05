@@ -2,7 +2,7 @@ import request from '@/utils/request'
 
 export const getDefectList = (params) => {
   return request({
-    url: '/defects/',
+    url: '/api/defects/',
     method: 'get',
     params
   })
@@ -10,7 +10,7 @@ export const getDefectList = (params) => {
 
 export const createDefect = (data) => {
   return request({
-    url: '/defects/',
+    url: '/api/defects/',
     method: 'post',
     data
   })
@@ -18,7 +18,7 @@ export const createDefect = (data) => {
 
 export const updateDefect = (id, data) => {
   return request({
-    url: `/defects/${id}/`,
+    url: `/api/defects/${id}/`,
     method: 'patch',
     data
   })
@@ -26,21 +26,21 @@ export const updateDefect = (id, data) => {
 
 export const deleteDefect = (id) => {
   return request({
-    url: `/defects/${id}/`,
+    url: `/api/defects/${id}/`,
     method: 'delete'
   })
 }
 
 export const getDefectDetail = (id) => {
   return request({
-    url: `/defects/${id}/`,
+    url: `/api/defects/${id}/`,
     method: 'get'
   })
 }
 
 export const updateDefectStatus = (id, data) => {
   return request({
-    url: `/defects/${id}/update_status/`,
+    url: `/api/defects/${id}/update_status/`,
     method: 'post',
     data
   })
@@ -48,7 +48,7 @@ export const updateDefectStatus = (id, data) => {
 
 export const addComment = (id, data) => {
   return request({
-    url: `/defects/${id}/add_comment/`,
+    url: `/api/defects/${id}/add_comment/`,
     method: 'post',
     data
   })
@@ -56,7 +56,7 @@ export const addComment = (id, data) => {
 
 export const getDefectStatistics = () => {
   return request({
-    url: '/defects/statistics/',
+    url: '/api/defects/statistics/',
     method: 'get'
   })
 }

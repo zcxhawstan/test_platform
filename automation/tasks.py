@@ -165,7 +165,7 @@ def execute_automation_task(self, task_id, user_id):
         
         # 7. 构建执行命令
         script_path = task.script_path
-        execution_command = f"pytest {script_path} --alluredir=./result -v"
+        execution_command = f"pytest {script_path} --alluredir=./result --clean-alluredir -v"
         
         # 设置执行环境
         env = os.environ.copy()
@@ -460,10 +460,13 @@ def stop_automation_task(task_id, user_id):
 
 
 @shared_task
+
 def generate_allure_report(execution_id):
     """生成Allure报告"""
     try:
         execution = ExecutionHistory.objects.get(id=execution_id)
+        task = execution.task
+        environment = execution.environment
         
         # 记录开始生成报告
         log_info_with_context(
@@ -474,52 +477,158 @@ def generate_allure_report(execution_id):
         
         # 构建报告路径（存储在media目录下，便于Web访问）
         report_dir = f'media/reports/allure/{execution.id}'
+        # 确保os模块可用
+        import os
         os.makedirs(report_dir, exist_ok=True)
         
-        # 生成报告（这里需要根据实际的Allure结果目录进行调整）
-        # 假设Allure结果在./result目录
-        result_dir = 'result'
-        if os.path.exists(result_dir):
-            # 执行Allure命令生成报告
-            subprocess.run(
-                f'allure generate {result_dir} -o {report_dir} --clean',
-                shell=True,
-                capture_output=True,
-                text=True
-            )
-            
-            # 创建报告记录
-            report = Report.objects.create(
+        # 生成报告（根据执行环境选择不同的方式）
+        if environment and environment.executor_ip and environment.executor_username:
+            # 远程执行，需要从远程复制Allure结果
+            log_info_with_context(
                 execution=execution,
-                report_type='allure',
-                report_path=report_dir,
-                report_url=f'/api/automation/reports/{execution.id}/download/',  # 临时URL，稍后更新
-                summary={
-                    'generated_at': datetime.now().isoformat(),
-                    'report_path': report_dir
-                }
+                message='远程执行环境，开始从远程复制Allure结果',
+                context={'executor_ip': environment.executor_ip, 'execution_id': execution_id}
             )
             
-            # 更新报告URL为正确的预览URL
-            report.report_url = f'/api/automation/reports/{report.id}/preview/'
-            report.save()
+            # 构建远程Allure结果目录路径
+            repo_name = task.git_repo.split('/')[-1].replace('.git', '') if task.git_repo else 'Auto_Test'
+            remote_result_dir = f'/opt/automation/repos/{repo_name}/result'
             
-            Log.objects.create(
-                execution=execution,
-                level='INFO',
-                message=json.dumps({
-                    'message': f'Allure报告生成成功',
-                    'timestamp': datetime.now().isoformat(),
-                    'level': 'INFO',
-                    'context': {'report_dir': report_dir}
-                }, ensure_ascii=False)
-            )
+            # 连接到远程执行机
+            from .services import SSHService
+            ssh_service = SSHService(environment=environment, execution=execution)
+            
+            if ssh_service.connect():
+                try:
+                    # 检查远程Allure结果目录是否存在
+                    check_cmd = f'ls -la {remote_result_dir}'
+                    success, stdout, stderr = ssh_service.execute_command(check_cmd)
+                    
+                    if success and 'No such file or directory' not in stderr:
+                        # 压缩远程Allure结果
+                        remote_zip = f'allure_result_{execution.id}.zip'
+                        zip_cmd = f'cd {remote_result_dir} && zip -r {remote_zip} .'
+                        success, stdout, stderr = ssh_service.execute_command(zip_cmd)
+                        
+                        if success:
+                            # 下载压缩文件到本地
+                            import tempfile
+                            import os
+                            # 使用临时目录来存储下载的文件
+                            with tempfile.TemporaryDirectory() as temp_dir:
+                                local_zip = os.path.join(temp_dir, f'allure_result_{execution.id}.zip')
+                                from scp import SCPClient
+                                scp = SCPClient(ssh_service.client.get_transport())
+                                # 使用相对路径下载文件
+                                scp.get(f'{remote_result_dir}/{remote_zip}', local_zip)
+                                scp.close()
+                                
+                                # 解压到本地临时目录
+                                import zipfile
+                                with zipfile.ZipFile(local_zip, 'r') as zip_ref:
+                                    zip_ref.extractall(temp_dir)
+                                
+                                # 执行Allure命令生成报告
+                                subprocess.run(
+                                    f'allure generate {temp_dir} -o {report_dir} --clean',
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True
+                                )
+                            
+                            # 删除远程临时文件
+                            ssh_service.execute_command(f'rm -f {remote_result_dir}/{remote_zip}')
+                            
+                            # 创建报告记录
+                            report = Report.objects.create(
+                                execution=execution,
+                                report_type='allure',
+                                report_path=report_dir,
+                                report_url=f'/api/automation/reports/{execution.id}/download/',  # 临时URL，稍后更新
+                                summary={
+                                    'generated_at': datetime.now().isoformat(),
+                                    'report_path': report_dir
+                                }
+                            )
+                            
+                            # 更新报告URL为正确的预览URL
+                            report.report_url = f'/api/automation/reports/{report.id}/preview/'
+                            report.save()
+                            
+                            Log.objects.create(
+                                execution=execution,
+                                level='INFO',
+                                message=json.dumps({
+                                    'message': f'Allure报告生成成功（远程执行）',
+                                    'timestamp': datetime.now().isoformat(),
+                                    'level': 'INFO',
+                                    'context': {'report_dir': report_dir, 'executor_ip': environment.executor_ip}
+                                }, ensure_ascii=False)
+                            )
+                        else:
+                            log_warning_with_context(
+                                execution=execution,
+                                message='压缩远程Allure结果失败',
+                                context={'remote_result_dir': remote_result_dir, 'error': stderr}
+                            )
+                    else:
+                        log_warning_with_context(
+                            execution=execution,
+                            message='远程Allure结果目录不存在，跳过报告生成',
+                            context={'remote_result_dir': remote_result_dir, 'error': stderr}
+                        )
+                finally:
+                    ssh_service.close()
+            else:
+                log_warning_with_context(
+                    execution=execution,
+                    message='无法连接到远程执行机，跳过报告生成',
+                    context={'executor_ip': environment.executor_ip}
+                )
         else:
-            log_warning_with_context(
-                execution=execution,
-                message='Allure结果目录不存在，跳过报告生成',
-                context={'result_dir': result_dir, 'execution_id': execution_id}
-            )
+            # 本地执行，直接使用本地Allure结果
+            result_dir = 'result'
+            if os.path.exists(result_dir):
+                # 执行Allure命令生成报告
+                subprocess.run(
+                    f'allure generate {result_dir} -o {report_dir} --clean',
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                # 创建报告记录
+                report = Report.objects.create(
+                    execution=execution,
+                    report_type='allure',
+                    report_path=report_dir,
+                    report_url=f'/api/automation/reports/{execution.id}/download/',  # 临时URL，稍后更新
+                    summary={
+                        'generated_at': datetime.now().isoformat(),
+                        'report_path': report_dir
+                    }
+                )
+                
+                # 更新报告URL为正确的预览URL
+                report.report_url = f'/api/automation/reports/{report.id}/preview/'
+                report.save()
+                
+                Log.objects.create(
+                    execution=execution,
+                    level='INFO',
+                    message=json.dumps({
+                        'message': f'Allure报告生成成功（本地执行）',
+                        'timestamp': datetime.now().isoformat(),
+                        'level': 'INFO',
+                        'context': {'report_dir': report_dir}
+                    }, ensure_ascii=False)
+                )
+            else:
+                log_warning_with_context(
+                    execution=execution,
+                    message='Allure结果目录不存在，跳过报告生成',
+                    context={'result_dir': result_dir, 'execution_id': execution_id}
+                )
             
     except Exception as e:
         if 'execution' in locals():
