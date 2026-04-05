@@ -1,298 +1,177 @@
-# 测试平台部署文档
+# 测试平台部署与启动指南
 
-## 项目简介
+## 1. 环境配置
 
-基于Vue3 + Django + pytest的企业级测试平台，提供用户管理、测试用例管理、测试计划管理、缺陷管理、接口测试、环境管理、日志管理等完整功能。
+### 1.1 配置文件
+- **文件**: `.env`
+- **位置**: 项目根目录
+- **用途**: 存储环境变量配置
 
-## 技术栈
+### 1.2 Redis资源隔离配置
 
-### 后端
-- Django 4.2
-- Django REST Framework
-- MySQL 8.0
-- Celery (异步任务)
-- Redis (消息队列)
-- pytest 7.0+ (测试框架)
-- allure (测试报告)
+测试平台使用Redis进行资源隔离，通过不同的数据库编号实现：
 
-### 前端
-- Vue 3 (Composition API)
-- Element Plus (UI组件库)
-- axios (HTTP客户端)
-- vue-router (路由管理)
-- pinia (状态管理)
-- echarts (数据可视化)
+| 数据库编号 | 用途 | 配置项 |
+|---------|------|--------|
+| 0 | Django缓存 (Cache) | `CACHES` 配置 |
+| 1 | Celery消息代理 (Broker) | `CELERY_BROKER_URL` 配置 |
+| 2 | Celery结果后端 (Result Backend) | `CELERY_RESULT_BACKEND` 配置 |
 
-## 环境要求
+### 1.3 配置示例
 
-- Python 3.8+
-- Node.js 16+
-- MySQL 8.0+
-- Redis 5.0+
+```env
+# Redis 配置
+REDIS_HOST=192.168.3.100
+REDIS_PORT=6379
+REDIS_PASSWORD=
 
-## 快速开始
-
-### 1. 克隆项目
-
-```bash
-git clone <repository-url>
-cd Mytest_Platform
+# Celery 配置 (使用上面的Redis配置)
+CELERY_BROKER_URL=redis://192.168.3.100:6379/1
+CELERY_RESULT_BACKEND=redis://192.168.3.100:6379/2
 ```
 
-### 2. 后端部署
+## 2. 服务启动
 
-#### 2.1 创建虚拟环境
+### 2.1 后端服务启动
 
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate  # Windows
+#### 2.1.1 激活虚拟环境
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
-#### 2.2 安装依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-#### 2.3 配置环境变量
-
-```bash
-cp .env.example .env
-# 编辑.env文件，配置数据库连接等信息
-```
-
-#### 2.4 创建数据库
-
-```bash
-mysql -u root -p
-CREATE DATABASE test_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-EXIT;
-```
-
-#### 2.5 数据库迁移
-
-```bash
-python manage.py makemigrations
-python manage.py migrate
-```
-
-#### 2.6 初始化数据
-
-```bash
-python scripts/init_db.py
-```
-
-#### 2.7 启动服务
-
-```bash
+#### 2.1.2 启动Django服务
+```powershell
 python manage.py runserver
 ```
+- **默认地址**: http://127.0.0.1:8000
 
-后端服务将运行在 http://localhost:8000
+#### 2.1.3 启动Celery Worker
+```powershell
+celery -A Django worker -l info
+```
+- **注意**: Celery worker会自动读取Django配置中的`CELERY_BROKER_URL`和`CELERY_RESULT_BACKEND`设置
+- **验证**: 启动时应显示连接到正确的Redis数据库
 
-### 3. 前端部署
+### 2.2 前端服务启动
 
-#### 3.1 安装依赖
-
-```bash
+#### 2.2.1 进入前端目录
+```powershell
 cd frontend
-npm install
 ```
 
-#### 3.2 启动开发服务器
+#### 2.2.2 启动前端服务
+```powershell
+npm run dev
+```
+- **默认地址**: http://localhost:5173
 
-```bash
+## 3. 验证方法
+
+### 3.1 检查Redis连接
+```powershell
+python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=1); print('Redis Broker connection:', r.ping())"
+python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=2); print('Redis Result Backend connection:', r.ping())"
+```
+
+### 3.2 检查Celery Worker状态
+- 启动Celery worker后，查看日志输出，确认：
+  - 连接到正确的Redis地址和数据库
+  - 成功注册了自动化任务
+  - 没有错误信息
+
+### 3.3 测试任务执行
+1. 通过前端界面或API创建并执行自动化测试任务
+2. 检查Celery worker日志，确认任务被接收和执行
+3. 检查执行历史，确认任务执行记录被创建
+
+## 4. 故障排除
+
+### 4.1 常见问题
+
+#### 4.1.1 Celery Worker无法接收到任务
+- **原因**: Redis连接问题或数据库编号配置错误
+- **解决**: 
+  - 检查Redis服务是否正常运行
+  - 验证`CELERY_BROKER_URL`配置是否正确
+  - 重启Celery worker
+
+#### 4.1.2 任务执行失败
+- **原因**: 测试文件不存在或导入错误
+- **解决**: 
+  - 检查测试文件路径是否正确
+  - 确保测试文件语法正确
+  - 检查依赖是否安装
+
+#### 4.1.3 Redis权限错误
+- **原因**: Windows系统权限限制
+- **解决**: 
+  - 以管理员身份运行终端
+  - 检查Redis服务权限设置
+
+### 4.2 日志查看
+
+#### 4.2.1 Django日志
+- **位置**: 终端输出
+- **内容**: API请求、错误信息
+
+#### 4.2.2 Celery Worker日志
+- **位置**: 终端输出
+- **内容**: 任务接收、执行过程、错误信息
+
+#### 4.2.3 执行历史日志
+- **路径**: 通过API访问 `/api/automation/executions/{id}/logs/`
+- **内容**: 任务执行详细日志
+
+## 5. 部署注意事项
+
+### 5.1 生产环境配置
+- 更改`DEBUG=False`
+- 生成新的`SECRET_KEY`
+- 使用正式的Redis服务
+- 配置合适的数据库连接
+
+### 5.2 服务管理
+- 使用进程管理工具（如Supervisor）管理服务
+- 配置日志轮转
+- 设置监控和告警
+
+### 5.3 性能优化
+- 调整Celery worker数量
+- 配置合适的任务超时时间
+- 优化Redis内存使用
+
+## 6. 命令速查
+
+### 6.1 启动服务
+```powershell
+# 后端服务
+.venv\Scripts\Activate.ps1
+python manage.py runserver
+
+# Celery Worker
+.venv\Scripts\Activate.ps1
+celery -A Django worker -l info
+
+# 前端服务
+cd frontend
 npm run dev
 ```
 
-前端服务将运行在 http://localhost:5173
+### 6.2 检查状态
+```powershell
+# 检查Redis连接
+python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=1); print('Redis Broker connection:', r.ping())"
 
-#### 3.3 构建生产版本
-
-```bash
-npm run build
+# 检查任务列表
+python -c "import requests; data = {'username': 'admin', 'password': 'admin123'}; login_response = requests.post('http://localhost:8000/api/auth/users/login/', json=data); if login_response.status_code == 200: token = login_response.json()['data']['token']; headers = {'Authorization': 'Token ' + token}; tasks_response = requests.get('http://localhost:8000/api/automation/tasks/', headers=headers); print('Tasks:', tasks_response.json())"
 ```
 
-构建后的文件在 `frontend/dist` 目录
+## 7. 技术支持
 
-### 4. 运行测试
+如果遇到问题，请检查以下内容：
+1. 环境配置是否正确
+2. Redis服务是否正常运行
+3. 服务启动命令是否正确
+4. 查看日志输出获取详细错误信息
 
-```bash
-# 运行所有测试
-pytest
-
-# 运行特定测试文件
-pytest tests/test_users.py
-
-# 生成allure报告
-pytest --alluredir=allure-results
-allure serve allure-results
-```
-
-## 项目结构
-
-```
-Mytest_Platform/
-├── Django/                 # Django项目配置
-│   ├── settings.py        # Django配置文件
-│   ├── urls.py           # URL路由配置
-│   └── wsgi.py          # WSGI配置
-├── users/                # 用户管理模块
-├── test_cases/           # 测试用例管理模块
-├── test_plans/           # 测试计划管理模块
-├── defects/              # 缺陷管理模块
-├── api_test/             # 接口测试模块
-├── environments/         # 环境管理模块
-├── logs/                 # 日志管理模块
-├── utils/                # 工具类
-├── tests/                # pytest测试用例
-├── scripts/              # 脚本文件
-├── frontend/             # Vue3前端项目
-│   ├── src/
-│   │   ├── api/        # API接口
-│   │   ├── views/      # 页面组件
-│   │   ├── router/     # 路由配置
-│   │   ├── stores/     # 状态管理
-│   │   └── utils/      # 工具函数
-│   ├── package.json
-│   └── vite.config.js
-├── manage.py
-├── requirements.txt
-└── README.md
-```
-
-## API文档
-
-### 认证接口
-
-- POST /api/auth/register/ - 用户注册
-- POST /api/auth/login/ - 用户登录
-- POST /api/auth/logout/ - 用户登出
-- GET /api/auth/profile/ - 获取用户信息
-- PUT /api/auth/profile/ - 更新用户信息
-- POST /api/auth/change-password/ - 修改密码
-
-### 测试用例接口
-
-- GET /api/testcases/ - 获取测试用例列表
-- POST /api/testcases/ - 创建测试用例
-- GET /api/testcases/{id}/ - 获取测试用例详情
-- PATCH /api/testcases/{id}/ - 更新测试用例
-- DELETE /api/testcases/{id}/ - 删除测试用例
-- POST /api/testcases/import_excel/ - 导入测试用例
-- GET /api/testcases/export_excel/ - 导出测试用例
-
-### 测试计划接口
-
-- GET /api/testplans/ - 获取测试计划列表
-- POST /api/testplans/ - 创建测试计划
-- GET /api/testplans/{id}/ - 获取测试计划详情
-- PATCH /api/testplans/{id}/ - 更新测试计划
-- DELETE /api/testplans/{id}/ - 删除测试计划
-- POST /api/testplans/{id}/add_cases/ - 添加用例到计划
-- DELETE /api/testplans/{id}/remove_case/{case_id}/ - 从计划移除用例
-- POST /api/testplans/{id}/cases/{case_id}/execute/ - 执行用例
-
-### 缺陷管理接口
-
-- GET /api/defects/ - 获取缺陷列表
-- POST /api/defects/ - 创建缺陷
-- GET /api/defects/{id}/ - 获取缺陷详情
-- PATCH /api/defects/{id}/ - 更新缺陷
-- DELETE /api/defects/{id}/ - 删除缺陷
-- POST /api/defects/{id}/update_status/ - 更新缺陷状态
-- POST /api/defects/{id}/add_comment/ - 添加评论
-
-### 接口测试接口
-
-- GET /api/apitest/environments/ - 获取API环境列表
-- POST /api/apitest/environments/ - 创建API环境
-- GET /api/apitest/cases/ - 获取API测试用例列表
-- POST /api/apitest/cases/ - 创建API测试用例
-- POST /api/apitest/cases/execute/ - 执行API测试
-- GET /api/apitest/executions/ - 获取执行记录
-
-### 环境管理接口
-
-- GET /api/environments/ - 获取环境列表
-- POST /api/environments/ - 创建环境
-- GET /api/environments/{id}/ - 获取环境详情
-- PATCH /api/environments/{id}/ - 更新环境
-- DELETE /api/environments/{id}/ - 删除环境
-- POST /api/environments/{id}/add_variable/ - 添加环境变量
-- DELETE /api/environments/{id}/variables/{var_id}/ - 删除环境变量
-
-### 日志管理接口
-
-- GET /api/logs/operations/ - 获取操作日志
-- GET /api/logs/errors/ - 获取错误日志
-
-## 默认账号
-
-- 管理员: admin / admin123
-- 测试用户: tester1 / tester123
-- 测试开发: tester_dev1 / testerdev123
-
-## 常见问题
-
-### 1. 数据库连接失败
-
-检查MySQL服务是否启动，以及.env文件中的数据库配置是否正确。
-
-### 2. 前端无法访问后端
-
-检查后端服务是否启动，以及vite.config.js中的代理配置是否正确。
-
-### 3. 测试用例导入失败
-
-确保上传的Excel文件格式正确，包含必要的列：标题、描述、模块、优先级、状态、前置条件、预期结果。
-
-### 4. Redis连接失败
-
-检查Redis服务是否启动，以及.env文件中的Redis配置是否正确。
-
-## 生产环境部署
-
-### 使用Gunicorn部署Django
-
-```bash
-pip install gunicorn
-gunicorn Django.wsgi:application --bind 0.0.0.0:8000 --workers 4
-```
-
-### 使用Nginx反向代理
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /static/ {
-        alias /path/to/your/staticfiles/;
-    }
-
-    location /media/ {
-        alias /path/to/your/media/;
-    }
-}
-```
-
-### 使用PM2管理Node.js进程
-
-```bash
-npm install -g pm2
-cd frontend
-pm2 start npm --name "test-platform-frontend" -- run dev
-```
-
-## 许可证
-
-MIT License
+如需进一步帮助，请提供详细的错误信息和操作步骤。

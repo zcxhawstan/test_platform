@@ -31,7 +31,12 @@
         </el-table-column>
         <el-table-column prop="environment" label="执行环境" width="150">
           <template #default="{ row }">
-            {{ row.environment ? row.environment.name : '-' }}
+            <span v-if="row.environment">
+              {{ row.environment.name || `环境ID: ${row.environment.id}` }}
+            </span>
+            <span v-else class="environment-not-set">
+              未设置
+            </span>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
@@ -49,11 +54,33 @@
             {{ getDockerContainerName(row) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="120">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="handleExecute(row)">执行</el-button>
-            <el-button type="warning" size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <el-dropdown>
+              <el-button type="primary" size="small">
+                操作 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="handleExecute(row)" :disabled="row.status === 'running'">
+                    <el-icon><VideoPlay /></el-icon> 执行
+                  </el-dropdown-item>
+                  <el-dropdown-item 
+                    v-if="row.status === 'running'" 
+                    @click="handleStop(row)"
+                    :loading="stoppingTaskId === row.id"
+                  >
+                    <el-icon><CircleClose /></el-icon> 停止
+                  </el-dropdown-item>
+                  <el-dropdown-item @click="handleEdit(row)">
+                    <el-icon><Edit /></el-icon> 编辑
+                  </el-dropdown-item>
+                  <el-dropdown-item @click="handleDelete(row)" divided>
+                    <el-icon><Delete /></el-icon> 删除
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -170,16 +197,22 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox, ElTooltip, ElIcon } from 'element-plus'
-import { WarningFilled } from '@element-plus/icons-vue'
+import { WarningFilled, ArrowDown, VideoPlay, CircleClose, Edit, Delete } from '@element-plus/icons-vue'
 import {
-  getTaskList, createTask, updateTask, deleteTask, executeTask,
+  getTaskList, createTask, updateTask, deleteTask, executeTask, stopTask,
   getEnvironmentList
 } from '@/api/automation'
 
+const router = useRouter()
+const route = useRoute()
+
 const loading = ref(false)
 const submitLoading = ref(false)
+const stoppingTaskId = ref(null)  // 正在停止的任务ID
+const refreshTimer = ref(null)    // 定时刷新器
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const formRef = ref()
@@ -299,9 +332,17 @@ const showAddDialog = () => {
 
 const handleEdit = (row) => {
   isEdit.value = true
+  
+  // 处理git_repo字段，确保是字符串
+  let gitRepo = row.git_repo || ''
+  if (Array.isArray(gitRepo)) {
+    console.warn('编辑时发现git_repo是数组:', gitRepo)
+    gitRepo = gitRepo[0] || ''
+  }
+  
   // 自动检测Git仓库类型
   let gitType = 'https'
-  if (row.git_repo && row.git_repo.startsWith('git@')) {
+  if (gitRepo && gitRepo.startsWith('git@')) {
     gitType = 'ssh'
   }
   
@@ -310,7 +351,7 @@ const handleEdit = (row) => {
     name: row.name,
     description: row.description,
     git_type: gitType,
-    git_repo: row.git_repo || '',
+    git_repo: gitRepo,
     git_branch: row.git_branch || 'main',
     script_path: row.script_path,
     environment: row.environment ? row.environment.id : null,
@@ -327,11 +368,29 @@ const handleSubmit = async () => {
   try {
     await formRef.value.validate()
     submitLoading.value = true
+    
+    // 数据清理：确保git_repo是字符串而不是数组
+    const submitData = { ...form }
+    
+    // 如果git_repo是数组，取第一个元素
+    if (Array.isArray(submitData.git_repo)) {
+      console.warn('git_repo是数组，自动转换为字符串:', submitData.git_repo)
+      submitData.git_repo = submitData.git_repo[0] || ''
+    }
+    
+    // 确保git_repo是字符串
+    if (typeof submitData.git_repo !== 'string') {
+      submitData.git_repo = String(submitData.git_repo || '')
+    }
+    
+    // 调试日志
+    console.log('提交数据:', submitData)
+    
     if (isEdit.value) {
-      await updateTask(form.id, form)
+      await updateTask(form.id, submitData)
       ElMessage.success('任务更新成功')
     } else {
-      await createTask(form)
+      await createTask(submitData)
       ElMessage.success('任务创建成功')
     }
     dialogVisible.value = false
@@ -356,7 +415,34 @@ const handleExecute = async (row) => {
     // 跳转到执行历史页面
     router.push('/automation/executions')
   } catch (error) {
-    ElMessage.error('启动任务失败')
+    console.error('执行任务失败:', error)
+    ElMessage.error('启动任务失败: ' + (error.message || '未知错误'))
+  }
+}
+
+const handleStop = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要停止任务 "${row.name}" 吗？`,
+      '确认停止',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    stoppingTaskId.value = row.id
+    const res = await stopTask(row.id)
+    ElMessage.success(res.message || '停止请求已发送')
+    // 刷新任务列表
+    loadTasks()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '停止任务失败')
+    }
+  } finally {
+    stoppingTaskId.value = null
   }
 }
 
@@ -384,21 +470,13 @@ const resetSearch = () => {
 }
 
 const getScriptSourceType = (source) => {
-  const typeMap = {
-    builtin: 'info',
-    upload: 'primary',
-    git: 'warning'
-  }
-  return typeMap[source] || 'info'
+  // 根据用户要求，脚本来源固定为"Git仓库"，使用warning类型
+  return 'warning'
 }
 
 const getScriptSourceText = (source) => {
-  const textMap = {
-    builtin: '平台内置',
-    upload: '上传',
-    git: 'Git仓库'
-  }
-  return textMap[source] || source
+  // 根据用户要求，直接显示"Git仓库"
+  return 'Git仓库'
 }
 
 const getStatusType = (status) => {
@@ -438,21 +516,57 @@ const formatDateTime = (dateTimeStr) => {
 }
 
 const getDockerContainerName = (row) => {
-  // 检查任务是否已经执行过
+  // 如果没有关联环境，无法生成容器名称
+  if (!row.environment) {
+    return '未设置环境'
+  }
+  
+  // 根据用户要求，显示实际任务执行后的容器名称
+  // 容器名称规则：automation-{environment.id}（与后端DockerService保持一致）
+  const containerName = `automation-${row.environment.id}`
+  
+  // 根据任务状态显示不同信息
   if (row.status === 'pending') {
-    return '任务执行后显示'
+    return `未执行 (将使用: ${containerName})`
+  } else if (row.status === 'running') {
+    return `执行中 (${containerName})`
+  } else if (row.status === 'success' || row.status === 'failed' || row.status === 'error' || row.status === 'stopped') {
+    // 任务已执行过，显示实际容器名称
+    return containerName
   }
-  // 生成容器名称（与后端DockerService保持一致）
-  if (row.environment && row.environment.id) {
-    return `automation-${row.environment.id}`
-  }
-  return '任务执行后显示'
+  
+  return containerName
 }
 
 onMounted(() => {
+  // 初始加载任务列表
   loadTasks()
   loadEnvironments()
+  
+  // 启动定时刷新（30秒一次）
+  refreshTimer.value = setInterval(() => {
+    // 只在页面活跃时刷新
+    if (document.visibilityState === 'visible') {
+      loadTasks()
+    }
+  }, 30000)  // 30秒刷新一次
 })
+
+onUnmounted(() => {
+  // 清理定时器
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+    refreshTimer.value = null
+  }
+})
+
+// 监听路由变化，当进入任务页面时刷新数据
+watch(() => route.path, (newPath, oldPath) => {
+  if (newPath.includes('/automation/tasks')) {
+    console.log('路由变化到任务页面，刷新数据')
+    loadTasks()
+  }
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -471,5 +585,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   margin: 0 20px;
+}
+
+.environment-not-set {
+  color: #999;
+  font-style: italic;
 }
 </style>

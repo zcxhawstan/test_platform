@@ -11,13 +11,13 @@ class EnvironmentSerializer(serializers.ModelSerializer):
                   'executor_ip', 'executor_port', 'executor_username', 'executor_password', 
                   'docker_image', 'docker_container_name', 'docker_ports', 'docker_volumes',
                   'is_connected', 'created_by', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'is_connected', 'created_by', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
 
 class AutomationTaskSerializer(serializers.ModelSerializer):
     """自动化任务序列化器"""
     script_source = serializers.CharField(default='git', read_only=True)
-    environment = EnvironmentSerializer(read_only=True)
+    environment = serializers.PrimaryKeyRelatedField(queryset=Environment.objects.all())
     
     class Meta:
         model = AutomationTask

@@ -13,10 +13,10 @@
         </div>
       </template>
       
-      <el-table :data="environments" v-loading="loading" border>
-        <el-table-column prop="id" label="环境ID" width="80" />
-        <el-table-column prop="name" label="环境名称" />
-        <el-table-column prop="environment_type" label="环境类型" width="120">
+      <el-table :data="environments" v-loading="loading" border style="width: 100%">
+        <el-table-column prop="id" label="环境ID" width="80" align="center" />
+        <el-table-column prop="name" label="环境名称" width="160" show-overflow-tooltip />
+        <el-table-column prop="environment_type" label="环境类型" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="getEnvironmentType(row.environment_type)">{{ getEnvironmentText(row.environment_type) }}</el-tag>
           </template>
@@ -149,7 +149,7 @@ const form = reactive({
   executor_port: 22,
   executor_username: '',
   executor_password: '',
-  docker_image: 'python:3.9',
+  docker_image: 'python:3.11',
   is_connected: false
 })
 
@@ -199,7 +199,7 @@ const showAddDialog = () => {
     executor_port: 22,
     executor_username: '',
     executor_password: '',
-    docker_image: 'python:3.9',
+    docker_image: 'python:3.11',
     is_connected: false
   })
   variablesText.value = ''
@@ -219,7 +219,7 @@ const handleEdit = (row) => {
     executor_port: row.executor_port || 22,
     executor_username: row.executor_username || '',
     executor_password: row.executor_password || '',
-    docker_image: row.docker_image || 'python:3.9',
+    docker_image: row.docker_image || 'python:3.11',
     is_connected: row.is_connected || false
   })
   // 将variables对象转换为文本格式

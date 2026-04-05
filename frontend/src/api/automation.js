@@ -82,7 +82,8 @@ export const deleteTask = (id) => {
 export const executeTask = (id) => {
   return request({
     url: `/automation/tasks/${id}/execute/`,
-    method: 'post'
+    method: 'post',
+    timeout: 60000  // 执行操作需要更长的超时时间
   })
 }
 

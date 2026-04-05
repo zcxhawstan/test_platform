@@ -140,7 +140,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { View, Document, Download, ArrowDown } from '@element-plus/icons-vue'
 import {
@@ -156,6 +157,7 @@ const executions = ref([])
 const logs = ref([])
 const reports = ref([])
 const currentExecution = ref(null)
+const refreshTimer = ref(null)
 
 const pagination = reactive({
   page: 1,
@@ -168,20 +170,56 @@ const searchForm = reactive({
   status: ''
 })
 
+const route = useRoute()
+
 const loadExecutions = async () => {
   loading.value = true
   try {
+    console.log('开始加载执行历史，参数:', {
+      page: pagination.page,
+      page_size: pagination.size,
+      task_name: searchForm.task_name,
+      status: searchForm.status
+    })
+    
+    // 检查本地存储的token
+    const token = localStorage.getItem('token')
+    console.log('本地token:', token ? '存在' : '不存在')
+    
     const res = await getExecutionList({
       page: pagination.page,
       page_size: pagination.size,
       task_name: searchForm.task_name,
       status: searchForm.status
     })
-    // 确保results是一个数组
-    executions.value = Array.isArray(res.results) ? res.results : []
-    pagination.total = res.count || 0
+    
+    console.log('执行历史API响应:', res)
+    console.log('响应类型:', typeof res)
+    console.log('响应结构:', Object.keys(res))
+    
+    // 检查响应格式
+    if (res.hasOwnProperty('results')) {
+      console.log('分页响应格式，results数量:', res.results ? res.results.length : 0)
+      // 确保results是一个数组
+      executions.value = Array.isArray(res.results) ? res.results : []
+      pagination.total = res.count || 0
+    } else if (res.hasOwnProperty('data')) {
+      console.log('标准API响应格式，data:', res.data)
+      // 处理标准API响应格式
+      executions.value = Array.isArray(res.data) ? res.data : []
+      pagination.total = executions.value.length
+    } else {
+      console.log('未知响应格式')
+      executions.value = []
+    }
+    
+    console.log('设置executions:', executions.value.length, '条记录')
+    console.log('设置pagination.total:', pagination.total)
+    
   } catch (error) {
-    ElMessage.error('加载执行历史失败')
+    console.error('加载执行历史失败:', error)
+    console.error('错误详情:', error.message, error.response)
+    ElMessage.error('加载执行历史失败: ' + (error.message || '未知错误'))
     // 出错时设置为空数组，避免表格渲染错误
     executions.value = []
   } finally {
@@ -189,13 +227,35 @@ const loadExecutions = async () => {
   }
 }
 
-// 定时刷新执行状态
-setInterval(() => {
-  // 只在页面活跃时刷新
-  if (document.visibilityState === 'visible') {
+// 定时刷新执行状态 - 改为30秒
+onMounted(() => {
+  // 初始加载执行历史
+  loadExecutions()
+  
+  // 启动定时刷新
+  refreshTimer.value = setInterval(() => {
+    // 只在页面活跃时刷新
+    if (document.visibilityState === 'visible') {
+      loadExecutions()
+    }
+  }, 30000)  // 30秒刷新一次
+})
+
+onUnmounted(() => {
+  // 清理定时器
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+    refreshTimer.value = null
+  }
+})
+
+// 监听路由变化，当进入执行历史页面时刷新数据
+watch(() => route.path, (newPath, oldPath) => {
+  if (newPath.includes('/automation/executions')) {
+    console.log('路由变化到执行历史页面，刷新数据')
     loadExecutions()
   }
-}, 5000)
+}, { immediate: true })
 
 const handleViewLogs = async (row) => {
   currentExecution.value = row
@@ -392,10 +452,6 @@ const formatDateTime = (dateTimeStr) => {
   const seconds = String(date.getSeconds()).padStart(2, '0')
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
-
-onMounted(() => {
-  loadExecutions()
-})
 </script>
 
 <style scoped>

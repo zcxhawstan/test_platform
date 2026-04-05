@@ -15,7 +15,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-8!67b^9z#^4=ps5yd-aq2
 
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -39,6 +39,9 @@ INSTALLED_APPS = [
     'automation',
 ]
 
+# 自定义用户模型
+AUTH_USER_MODEL = 'users.User'
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -49,7 +52,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'logs.middleware.LoggingMiddleware',
 ]
 
 ROOT_URLCONF = 'Django.urls'
@@ -57,7 +59,7 @@ ROOT_URLCONF = 'Django.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
+        'DIRS': [],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -72,6 +74,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'Django.wsgi.application'
 
+# 数据库配置
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -79,6 +82,19 @@ DATABASES = {
     }
 }
 
+# 缓存配置 (使用Redis数据库0)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': f"redis://{os.environ.get('REDIS_HOST', '192.168.3.100')}:{os.environ.get('REDIS_PORT', '6379')}/{os.environ.get('REDIS_DB_CACHE', '0')}",
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'PASSWORD': os.environ.get('REDIS_PASSWORD', ''),
+        }
+    }
+}
+
+# 密码验证
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -94,26 +110,36 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# 国际化
 LANGUAGE_CODE = 'zh-hans'
-
 TIME_ZONE = 'Asia/Shanghai'
-
 USE_I18N = True
-
 USE_TZ = True
 
-STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+# 静态文件
+STATIC_URL = 'static/'
 
+# 媒体文件
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Celery 配置
-CELERY_BROKER_URL = 'django-db'
-CELERY_RESULT_BACKEND = 'django-db'
+# Celery 配置 (使用Redis数据库隔离)
+# Redis数据库1用于消息代理(Broker)，数据库2用于结果后端(Result Backend)
+REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.3.100')
+REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', '')
+REDIS_DB_BROKER = os.environ.get('REDIS_DB_BROKER', '1')
+REDIS_DB_RESULT = os.environ.get('REDIS_DB_RESULT', '2')
+
+# 构建Redis URL
+REDIS_BASE_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
+if REDIS_PASSWORD:
+    REDIS_BASE_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}"
+
+CELERY_BROKER_URL = f"{REDIS_BASE_URL}/{REDIS_DB_BROKER}"
+CELERY_RESULT_BACKEND = f"{REDIS_BASE_URL}/{REDIS_DB_RESULT}"
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -132,100 +158,22 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
-    'DEFAULT_FILTER_BACKENDS': [
-        'django_filters.rest_framework.DjangoFilterBackend',
-        'rest_framework.filters.SearchFilter',
-        'rest_framework.filters.OrderingFilter',
-    ],
-    'EXCEPTION_HANDLER': 'utils.exceptions.custom_exception_handler',
-    'DEFAULT_RENDERER_CLASSES': [
-        'rest_framework.renderers.JSONRenderer',
-    ],
 }
 
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:5174",
-    "http://localhost:5175",
-    "http://127.0.0.1:5174",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-]
-
-CSRF_COOKIE_HTTPONLY = False
-SESSION_COOKIE_HTTPONLY = False
-
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-]
-
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
-AUTH_USER_MODEL = 'users.User'
-
+# 日志配置
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {message}',
-            'style': '{',
-        },
-        'simple': {
-            'format': '{levelname} {message}',
-            'style': '{',
-        },
-    },
-    'filters': {
-        'require_debug_true': {
-            '()': 'django.utils.log.RequireDebugTrue',
-        },
-    },
     'handlers': {
         'console': {
-            'level': 'INFO',
-            'filters': ['require_debug_true'],
             'class': 'logging.StreamHandler',
-            'formatter': 'simple'
-        },
-        'file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': BASE_DIR / 'logs' / 'django.log',
-            'maxBytes': 1024 * 1024 * 10,
-            'backupCount': 5,
-            'formatter': 'verbose',
-        },
-        'error_file': {
-            'level': 'ERROR',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': BASE_DIR / 'logs' / 'error.log',
-            'maxBytes': 1024 * 1024 * 10,
-            'backupCount': 5,
-            'formatter': 'verbose',
         },
     },
-    'loggers': {
-        'django': {
-            'handlers': ['console', 'file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'django.request': {
-            'handlers': ['console', 'error_file'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
     },
 }
-
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE

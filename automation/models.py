@@ -25,7 +25,7 @@ class Environment(models.Model):
     executor_password = models.CharField(max_length=100, blank=True, null=True, verbose_name='SSH密码')
     
     # Docker配置
-    docker_image = models.CharField(max_length=200, default='python:3.9', verbose_name='Docker镜像')
+    docker_image = models.CharField(max_length=200, default='python:3.11', verbose_name='Docker镜像')
     docker_container_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='容器名称')
     docker_ports = models.JSONField(default=list, verbose_name='端口映射')
     docker_volumes = models.JSONField(default=list, verbose_name='卷映射')

@@ -9,18 +9,8 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Django.settings')
 # 创建Celery实例
 app = Celery('Django')
 
-# 直接设置Celery配置
-app.conf.update(
-    broker_url='memory://',
-    result_backend='django-db',
-    accept_content=['application/json'],
-    task_serializer='json',
-    result_serializer='json',
-    timezone='Asia/Shanghai',
-    task_track_started=True,
-    task_soft_time_limit=3600,
-    task_time_limit=7200
-)
+# 从Django设置中加载配置
+app.config_from_object('django.conf:settings', namespace='CELERY')
 
 # 自动发现任务
 app.autodiscover_tasks()
