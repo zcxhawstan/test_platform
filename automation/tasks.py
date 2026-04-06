@@ -507,7 +507,9 @@ def generate_allure_report(execution_id):
                     if success and 'No such file or directory' not in stderr:
                         # 压缩远程Allure结果
                         remote_zip = f'allure_result_{execution.id}.zip'
-                        zip_cmd = f'cd {remote_result_dir} && zip -r {remote_zip} .'
+                        # 在Docker容器中执行zip命令，这样只会压缩本次执行的结果
+                        container_name = f'automation-{execution.environment.id}'
+                        zip_cmd = f'docker exec {container_name} bash -c "cd {remote_result_dir} && zip -r {remote_zip} ."'
                         success, stdout, stderr = ssh_service.execute_command(zip_cmd)
                         
                         if success:
@@ -519,8 +521,14 @@ def generate_allure_report(execution_id):
                                 local_zip = os.path.join(temp_dir, f'allure_result_{execution.id}.zip')
                                 from scp import SCPClient
                                 scp = SCPClient(ssh_service.client.get_transport())
-                                # 使用相对路径下载文件
-                                scp.get(f'{remote_result_dir}/{remote_zip}', local_zip)
+                                # 从容器中复制文件到宿主机
+                                copy_cmd = f'docker cp {container_name}:{remote_result_dir}/{remote_zip} {remote_result_dir}/'
+                                success_copy, stdout_copy, stderr_copy = ssh_service.execute_command(copy_cmd)
+                                if success_copy:
+                                    # 从宿主机下载文件
+                                    scp.get(f'{remote_result_dir}/{remote_zip}', local_zip)
+                                else:
+                                    raise Exception(f'从容器复制文件失败: {stderr_copy}')
                                 scp.close()
                                 
                                 # 解压到本地临时目录
