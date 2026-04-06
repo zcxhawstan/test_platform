@@ -836,7 +836,7 @@ class CommandExecutor:
             log_warning(f"无法验证pytest.ini文件: {verify_err}", context={'pytest_ini_path': pytest_ini_path, 'error': verify_err})
         
         # 构建详细的执行命令，添加-v选项获取更详细的输出
-        execution_command = f"cd {repo_path} && export PYTHONPATH={repo_path} && python -m pytest {relative_script_path} --alluredir=./result --rootdir={repo_path} --override-ini=rootdir={repo_path} -v"
+        execution_command = f"cd {repo_path} && export PYTHONPATH={repo_path} && python -m pytest {relative_script_path} --alluredir=./result --clean-alluredir --rootdir={repo_path} --override-ini=rootdir={repo_path} -v"
         
         # 添加调试信息：直接尝试导入测试文件
         log_info("开始执行调试导入命令", context={'repo_path': repo_path})
