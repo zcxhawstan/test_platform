@@ -41,15 +41,17 @@ CELERY_RESULT_BACKEND=redis://192.168.3.100:6379/2
 
 #### 2.1.2 启动Django服务
 ```powershell
-python manage.py runserver
+python manage.py runserver 0.0.0.0:8000
 ```
-- **默认地址**: http://127.0.0.1:8000
+- **默认地址**: http://0.0.0.0:8000
 
 #### 2.1.3 启动Celery Worker
 ```powershell
-celery -A Django worker -l info
+.venv\Scripts\python.exe -m celery -A Django worker --loglevel=info --pool=solo
 ```
-- **注意**: Celery worker会自动读取Django配置中的`CELERY_BROKER_URL`和`CELERY_RESULT_BACKEND`设置
+- **注意**: 
+  - 使用`--pool=solo`参数避免Windows权限问题
+  - Celery worker会自动读取Django配置中的`CELERY_BROKER_URL`和`CELERY_RESULT_BACKEND`设置
 - **验证**: 启动时应显示连接到正确的Redis数据库
 
 ### 2.2 前端服务启动
@@ -83,6 +85,7 @@ python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=2);
 1. 通过前端界面或API创建并执行自动化测试任务
 2. 检查Celery worker日志，确认任务被接收和执行
 3. 检查执行历史，确认任务执行记录被创建
+4. 查看Allure报告，确认报告生成正确
 
 ## 4. 故障排除
 
@@ -106,7 +109,12 @@ python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=2);
 - **原因**: Windows系统权限限制
 - **解决**: 
   - 以管理员身份运行终端
+  - 使用`--pool=solo`参数启动Celery worker
   - 检查Redis服务权限设置
+
+#### 4.1.4 Allure报告统计错误
+- **原因**: 宿主机上的result目录包含历史执行结果
+- **解决**: 系统已自动修复，现在在Docker容器中执行zip命令
 
 ### 4.2 日志查看
 
@@ -146,11 +154,11 @@ python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=2);
 ```powershell
 # 后端服务
 .venv\Scripts\Activate.ps1
-python manage.py runserver
+python manage.py runserver 0.0.0.0:8000
 
 # Celery Worker
 .venv\Scripts\Activate.ps1
-celery -A Django worker -l info
+.venv\Scripts\python.exe -m celery -A Django worker --loglevel=info --pool=solo
 
 # 前端服务
 cd frontend

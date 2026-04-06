@@ -6,6 +6,7 @@
 - Node.js 16+
 - Redis 5.0+ (远程服务器)
 - MySQL 8.0+ (可选，默认使用 SQLite)
+- Docker (用于运行自动化测试)
 
 ## 2. 项目结构
 
@@ -26,7 +27,10 @@ Mytest_Platform/
 ├── manage.py            # Django 管理脚本
 ├── requirements.txt     # Python 依赖
 ├── frontend/package.json # 前端依赖
-└── .env                 # 环境配置文件
+├── .env                 # 环境配置文件
+├── README.md            # 项目说明
+├── DEPLOYMENT.md        # 部署与启动指南
+└── DEPLOYMENT_GUIDE.md  # 详细部署指导
 ```
 
 ## 3. 环境配置
@@ -154,10 +158,10 @@ python manage.py runserver 0.0.0.0:8000
 .venv\Scripts\Activate.ps1
 
 # 启动 Celery 工人 (使用 solo pool 避免 Windows 权限问题)
-celery -A Django worker --loglevel=info --pool=solo
+.venv\Scripts\python.exe -m celery -A Django worker --loglevel=info --pool=solo
 
 # 可选：启动 Celery Beat (用于定时任务)
-celery -A Django beat --loglevel=info
+.venv\Scripts\python.exe -m celery -A Django beat --loglevel=info
 ```
 
 ### 6.3 启动前端服务
@@ -201,6 +205,11 @@ npm run dev
 - 确保测试文件中的依赖项已安装
 - 检查测试文件的导入路径是否正确
 - 查看 Celery 日志中的详细错误信息
+
+### 8.5 Allure报告统计错误
+
+- **原因**: 宿主机上的result目录包含历史执行结果
+- **解决**: 系统已自动修复，现在在Docker容器中执行zip命令
 
 ## 9. 生产环境部署
 
@@ -294,19 +303,43 @@ npm run dev
 3. 创建或选择现有任务
 4. 点击「执行」按钮
 5. 查看执行历史和日志
+6. 查看Allure报告
 
-## 12. 技术栈
+## 12. 功能说明
 
-- **后端**: Django 4.2+, REST Framework, Celery 5.3+
-- **前端**: Vue 3, Element Plus, Axios
+### 12.1 核心功能
+
+- **用户管理**: 用户注册、登录、权限管理
+- **测试用例管理**: 用例CRUD、导入导出、分类管理、时间格式化
+- **测试计划管理**: 计划创建、用例分配、执行跟踪、时间格式化
+- **缺陷管理**: 缺陷跟踪、状态流转、评论功能、时间格式化
+- **接口测试**: API环境管理、用例执行、结果记录、响应时间格式化
+- **自动化测试**: 任务管理、远程执行、Docker容器、Allure报告
+- **环境管理**: 多环境配置、变量管理
+- **日志管理**: 操作日志、错误日志、统计分析
+
+### 12.2 技术特性
+
+- **Redis资源隔离**: 使用不同的Redis数据库编号进行资源隔离
+- **Docker容器**: 自动化测试在Docker容器中执行，确保环境一致性
+- **Allure报告**: 生成详细的测试报告，支持图表和趋势分析
+- **时间格式化**: 所有时间字段都进行了格式化，提高可读性
+- **权限控制**: 基于角色的权限管理，确保数据安全
+
+## 13. 技术栈
+
+- **后端**: Django 4.2+, REST Framework, Celery 5.3+, scp 0.15+
+- **前端**: Vue 3, Element Plus, Axios, vue-router, pinia, echarts
 - **数据库**: SQLite (默认), MySQL (可选)
 - **消息队列**: Redis 5.0+
-- **测试框架**: Pytest, Allure
+- **测试框架**: Pytest 9.0+, Allure 2.15+
+- **容器化**: Docker
 
-## 13. 注意事项
+## 14. 注意事项
 
 - 生产环境请修改 `SECRET_KEY`
 - 生产环境请设置 `DEBUG=False`
 - 定期备份数据库和 Redis 数据
 - 监控服务运行状态和日志
 - 确保服务器安全，配置防火墙规则
+- 确保远程执行机上的Docker服务正常运行
