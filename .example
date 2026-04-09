@@ -9,21 +9,25 @@
 DB_ENGINE=django.db.backends.mysql
 DB_NAME=test_platform
 DB_USER=root
-DB_PASSWORD=your_password
-DB_HOST=192.168.3.100
+DB_PASSWORD=your_db_password
+DB_HOST=your_mysql_host
 DB_PORT=3306
 
 # ============================================
 # Redis 配置 (用于Celery和缓存)
 # ============================================
-REDIS_HOST=192.168.3.100
+REDIS_HOST=your_redis_host
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_PASSWORD=
 
 # Celery 配置 (使用上面的Redis配置)
-CELERY_BROKER_URL=redis://192.168.3.100:6379/0
-CELERY_RESULT_BACKEND=redis://192.168.3.100:6379/0
+# 资源隔离配置：
+# DB 0: Django 缓存 (Cache)
+# DB 1: Celery 消息代理 (Broker)
+# DB 2: Celery 结果后端 (Result Backend)
+CELERY_BROKER_URL=redis://your_redis_host:6379/1
+CELERY_RESULT_BACKEND=redis://your_redis_host:6379/2
 
 # ============================================
 # Django 安全密钥 (生产环境请修改)
@@ -38,7 +42,7 @@ DEBUG=True
 # ============================================
 # 允许访问的主机 (多个用逗号分隔)
 # ============================================
-ALLOWED_HOSTS=localhost,127.0.0.1,192.168.3.100
+ALLOWED_HOSTS=localhost,127.0.0.1,your_server_host
 
 # ============================================
 # 管理员账号配置 (首次初始化时使用)

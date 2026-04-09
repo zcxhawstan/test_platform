@@ -166,6 +166,9 @@ frontend/*.local
 # Media files
 media/
 
+# Trae IDE configuration
+.trae/
+
 # Spyder project settings
 .spyderproject
 .spyproject
