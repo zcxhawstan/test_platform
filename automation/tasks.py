@@ -1,4 +1,5 @@
 from celery import shared_task
+import logging
 import subprocess
 import os
 import shlex
@@ -15,6 +16,8 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 User = get_user_model()
+
+logger = logging.getLogger(__name__)
 
 import traceback
 
@@ -50,11 +53,10 @@ def log_with_context(execution, level, message, exception=None, context=None):
         message=log_message
     )
     
-    # 同时在控制台输出（便于调试）
-    print(f"[{level}] {message}")
+    # 同时输出到日志（便于worker侧排查）
+    getattr(logger, level.lower(), logger.info)(message)
     if exception:
-        print(f"异常: {type(exception).__name__}: {str(exception)}")
-        traceback.print_exc()
+        logger.error('异常: %s: %s', type(exception).__name__, exception)
 
 def log_error_with_stack(execution, message, exception, context=None):
     """记录错误信息（包含堆栈跟踪）"""
@@ -117,7 +119,31 @@ def kill_process_tree(pid):
         for p in alive:
             p.kill()
     except Exception as e:
-        print(f"终止进程失败: {e}")
+        logger.error('终止进程失败: %s', e)
+
+
+def _parse_local_junit(junit_path):
+    """解析本地junitxml，返回用例统计dict（文件不存在/解析失败返回None）"""
+    import xml.etree.ElementTree as ET
+    if not os.path.isfile(junit_path):
+        return None
+    try:
+        root = ET.parse(junit_path).getroot()
+        suites = root.findall('.//testsuite')
+        if not suites:
+            return None
+        summary = {
+            'total': sum(int(s.get('tests', 0)) for s in suites),
+            'failed': sum(int(s.get('failures', 0)) for s in suites),
+            'errors': sum(int(s.get('errors', 0)) for s in suites),
+            'skipped': sum(int(s.get('skipped', 0)) for s in suites),
+            'time': round(sum(float(s.get('time', 0)) for s in suites), 3),
+        }
+        summary['passed'] = summary['total'] - summary['failed'] - summary['errors'] - summary['skipped']
+        return summary
+    except (ET.ParseError, ValueError) as e:
+        logger.warning('junitxml解析失败 %s: %s', junit_path, e)
+        return None
 
 @shared_task(bind=True, max_retries=0)
 def execute_automation_task(self, task_id, user_id):
@@ -185,10 +211,12 @@ def execute_automation_task(self, task_id, user_id):
         # Allure结果目录按execution隔离，避免并发执行互相覆盖
         script_path = task.script_path
         local_result_dir = f'./result_{execution.id}'
-        execution_command = f"pytest {shlex.quote(script_path)} --alluredir={shlex.quote(local_result_dir)} --clean-alluredir -v"
+        local_junit_xml = f'./junit_{execution.id}.xml'
+        execution_command = f"pytest {shlex.quote(script_path)} --alluredir={shlex.quote(local_result_dir)} --clean-alluredir --junitxml={shlex.quote(local_junit_xml)} -v"
         # 本地执行用列表参数（不走shell），杜绝注入面
         execution_command_args = [sys.executable, '-m', 'pytest', script_path,
-                                  f'--alluredir={local_result_dir}', '--clean-alluredir', '-v']
+                                  f'--alluredir={local_result_dir}', '--clean-alluredir',
+                                  f'--junitxml={local_junit_xml}', '-v']
         
         # 设置执行环境
         env = os.environ.copy()
@@ -267,7 +295,17 @@ def execute_automation_task(self, task_id, user_id):
                 try:
                     stdout, stderr = process.communicate(timeout=timeout_seconds)
                     exit_code = process.returncode
-                    
+
+                    # 解析本地junitxml用例统计（文件存在才有）
+                    summary = _parse_local_junit(local_junit_xml)
+                    if summary:
+                        ExecutionHistory.objects.filter(id=execution.id).update(test_summary=summary)
+                        log_info_with_context(
+                            execution=execution,
+                            message='用例统计已记录',
+                            context={'test_summary': summary}
+                        )
+
                     log_info_with_context(
                         execution=execution,
                         message=f'本地执行完成',
@@ -349,13 +387,14 @@ def execute_automation_task(self, task_id, user_id):
                 context={'exit_code': exit_code, 'status': final_status}
             )
         
-        # 11. 更新执行历史
+        # 11. 更新执行历史（test_summary已在步骤8单独update，这里save整对象）
         execution.status = final_status
         execution.end_time = timezone.now()
         if execution.start_time:
             execution.duration = (execution.end_time - execution.start_time).total_seconds()
         execution.exit_code = exit_code
-        execution.save()
+        # 防止内存中旧对象的空test_summary覆盖步骤8已写入的统计
+        execution.save(update_fields=['status', 'end_time', 'duration', 'exit_code'])
         
         # 12. 更新任务状态（CAS：仅running可流转到终态，防止覆盖stop请求或并发执行的结果）
         AutomationTask.objects.filter(

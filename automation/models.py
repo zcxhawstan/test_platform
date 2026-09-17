@@ -117,6 +117,8 @@ class ExecutionHistory(models.Model):
     end_time = models.DateTimeField(null=True, blank=True, verbose_name='结束时间')
     duration = models.FloatField(null=True, blank=True, verbose_name='执行时长(秒)')
     exit_code = models.IntegerField(null=True, blank=True, verbose_name='退出码')
+    # junitxml解析出的用例统计：{total, passed, failed, skipped, errors}
+    test_summary = models.JSONField(default=dict, blank=True, verbose_name='用例统计')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     
     class Meta:

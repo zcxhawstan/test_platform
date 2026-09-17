@@ -45,6 +45,9 @@
 ### 后端启动
 
 ```bash
+# 安装依赖（依赖清单以 requirements.txt 为准，pyproject.toml 与其同步）
+pip install -r requirements.txt
+
 # 激活虚拟环境
 .venv\Scripts\Activate.ps1
 

@@ -1,33 +1,49 @@
-import paramiko
-import time
-import json
+"""
+自动化执行服务。
+
+四对象职责：
+- SSHService：远程执行机连接与命令执行
+- DockerService：容器生命周期与容器内命令执行
+- GitService：测试仓库克隆/拉取/切分支
+- TaskExecutor：任务编排（拉代码→起容器→装依赖→跑pytest）
+
+所有拼入远程shell的变量一律经 shlex.quote 包裹；
+输入侧白名单校验见 automation/serializers.py。
+"""
+
+import logging
 import os
 import shlex
-import functools
+import time
+
+import paramiko
+
 from .models import Environment
+
+logger = logging.getLogger(__name__)
+
+# 远程执行机的代码仓库根目录（宿主机与容器通过卷映射共享）
+REPOS_ROOT = '/opt/automation/repos'
 
 
 class SSHService:
     """SSH服务类，用于连接执行机"""
-    
+
     def __init__(self, environment=None, host=None, port=None, username=None, password=None, execution=None):
         """
-        初始化SSH服务
-        支持两种方式：
-        1. 传入 environment 对象（用于已保存的环境）
+        初始化SSH服务，支持两种方式：
+        1. 传入 environment 对象（用于已保存的环境，密码自动解密）
         2. 传入 host, port, username, password（用于新增环境时的测试）
         """
         self.client = None
         self.max_retry = 3
         self.retry_delay = 5
         self.execution = execution
-        
+
         if environment is not None:
-            # 方式1：使用环境对象
             self.environment = environment
             self._use_env_obj = True
         elif host and username and password:
-            # 方式2：使用直接传入的参数
             self._host = host
             self._port = port or 22
             self._username = username
@@ -35,7 +51,7 @@ class SSHService:
             self._use_env_obj = False
         else:
             raise ValueError("必须提供 environment 对象或 host/username/password 参数")
-    
+
     def _get_connection_params(self):
         """获取连接参数"""
         if self._use_env_obj:
@@ -45,14 +61,13 @@ class SSHService:
                 'username': self.environment.executor_username,
                 'password': self.environment.get_executor_password(),
             }
-        else:
-            return {
-                'hostname': self._host,
-                'port': self._port,
-                'username': self._username,
-                'password': self._password,
-            }
-    
+        return {
+            'hostname': self._host,
+            'port': self._port,
+            'username': self._username,
+            'password': self._password,
+        }
+
     def connect(self, retry_count=0):
         """连接到执行机，支持自动重试"""
         try:
@@ -68,14 +83,13 @@ class SSHService:
             )
             return True
         except Exception as e:
-            error_msg = f"SSH连接失败: {str(e)}"
-            print(error_msg)
+            logger.error('SSH连接失败: %s', e)
             if retry_count < self.max_retry:
-                print(f"尝试重连 ({retry_count + 1}/{self.max_retry})...")
+                logger.info('尝试重连 (%d/%d)...', retry_count + 1, self.max_retry)
                 time.sleep(self.retry_delay)
                 return self.connect(retry_count + 1)
             return False
-    
+
     def test_connection(self):
         """测试SSH连接，返回 (success, message)"""
         try:
@@ -83,71 +97,57 @@ class SSHService:
             if success:
                 self.close()
                 return True, "连接成功"
-            else:
-                return False, "无法建立SSH连接"
+            return False, "无法建立SSH连接"
         except Exception as e:
             return False, str(e)
-    
+
     def is_connected(self):
         """检查连接状态"""
         if not self.client:
             return False
         try:
-            # 发送一个简单的命令来测试连接
-            stdin, stdout, stderr = self.client.exec_command('echo ping')
+            self.client.exec_command('echo ping')
             return True
         except Exception:
             return False
-    
+
     def execute_command(self, command, retry_count=0):
         """在执行机上执行命令，支持自动重连"""
-        # 记录命令执行开始
-        print(f"[SSH] 开始执行命令: {command}")
-        
-        # 如果有execution对象，记录到数据库日志
+        logger.debug('[SSH] 执行命令: %s', command)
+
         if self.execution:
             from .tasks import log_info_with_context
             log_info_with_context(
                 execution=self.execution,
-                message=f"开始执行SSH命令",
+                message='开始执行SSH命令',
                 context={'command': command, 'type': 'ssh_command'}
             )
-        
-        # 检查连接状态
+
         if not self.client or not self.is_connected():
             if not self.connect():
-                # 记录失败日志
                 if self.execution:
                     from .tasks import log_error_with_stack
                     log_error_with_stack(
                         execution=self.execution,
-                        message=f"SSH命令执行失败",
+                        message='SSH命令执行失败',
                         exception=Exception("SSH连接失败"),
-                        context={'command': command, 'error': "SSH连接失败", 'type': 'ssh_command'}
+                        context={'error': "SSH连接失败", 'type': 'ssh_command'}
                     )
-                print(f"[SSH] 命令执行失败")
-                print(f"[SSH] 错误信息: SSH连接失败")
+                logger.error('[SSH] 命令执行失败: SSH连接失败')
                 return False, "SSH连接失败", ""
-        
+
         try:
-            # 为所有命令添加超时，防止卡住
             stdin, stdout, stderr = self.client.exec_command(command, timeout=120)
             stdout = stdout.read().decode('utf-8')
             stderr = stderr.read().decode('utf-8')
-            
-            # 记录成功日志
-            print(f"[SSH] 命令执行成功")
-            if stdout:
-                print(f"[SSH] 标准输出: {stdout[:200]}..." if len(stdout) > 200 else f"[SSH] 标准输出: {stdout}")
-            if stderr:
-                print(f"[SSH] 标准错误: {stderr[:200]}..." if len(stderr) > 200 else f"[SSH] 标准错误: {stderr}")
-            
-            # 记录成功日志到数据库
+
+            logger.debug('[SSH] 命令执行成功 stdout=%s...', stdout[:200])
+
             if self.execution:
                 from .tasks import log_info_with_context
                 log_info_with_context(
                     execution=self.execution,
-                    message=f"SSH命令执行成功",
+                    message='SSH命令执行成功',
                     context={
                         'command': command,
                         'stdout': stdout[:300],
@@ -155,255 +155,196 @@ class SSHService:
                         'type': 'ssh_command'
                     }
                 )
-            
+
             return True, stdout, stderr
         except Exception as e:
             error_msg = f"执行命令失败: {str(e)}"
-            print(f"[SSH] 命令执行失败")
-            print(f"[SSH] 错误信息: {error_msg}")
-            
-            # 记录失败日志到数据库
+            logger.error('[SSH] 命令执行失败: %s', error_msg)
+
             if self.execution:
                 from .tasks import log_error_with_stack
                 log_error_with_stack(
                     execution=self.execution,
-                    message=f"SSH命令执行失败",
+                    message='SSH命令执行失败',
                     exception=e,
                     context={'command': command, 'error': error_msg, 'type': 'ssh_command'}
                 )
-            
-            # 尝试重连
+
             if retry_count < self.max_retry:
                 if self.connect():
                     return self.execute_command(command, retry_count + 1)
             return False, error_msg, ""
-    
+
     def close(self):
         """关闭SSH连接"""
         if self.client:
             try:
                 self.client.close()
             except Exception as e:
-                print(f"关闭SSH连接失败: {str(e)}")
+                logger.warning('关闭SSH连接失败: %s', e)
             finally:
                 self.client = None
 
 
 class DockerService:
     """Docker服务类，用于管理Docker容器"""
-    
+
     def __init__(self, environment, execution=None):
         self.environment = environment
         self.execution = execution
         self.ssh_service = SSHService(environment, execution=execution)
-    
+
+    @property
+    def container_name(self):
+        return f"automation-{self.environment.id}"
+
     def ensure_docker_running(self):
         """确保Docker服务运行"""
         success, stdout, stderr = self.ssh_service.execute_command('systemctl status docker')
         if not success:
             return False, "无法检查Docker状态"
-        
+
         if 'Active: active (running)' not in stdout:
-            # 尝试启动Docker服务
             success, stdout, stderr = self.ssh_service.execute_command('sudo systemctl start docker')
             if not success:
                 return False, "无法启动Docker服务"
             time.sleep(2)
-        
+
         return True, "Docker服务运行正常"
-    
+
     def get_available_port(self):
         """获取可用端口"""
-        # 检查常用端口是否可用
         for port in range(8000, 9000):
             success, stdout, stderr = self.ssh_service.execute_command(f"netstat -tuln | grep :{port}")
             if not success or str(port) not in stdout:
                 return port
         return 8000
-    
+
     def create_container(self):
         """创建Docker容器"""
-        # 确保Docker服务运行
         success, message = self.ensure_docker_running()
         if not success:
             return False, message
 
-        # 生成容器名称
-        container_name = f"automation-{self.environment.id}"
+        container_name = self.container_name
 
-        # 检查容器是否已存在
+        # 容器已存在则删除重建（保证环境干净）
         success, stdout, stderr = self.ssh_service.execute_command(f"docker ps -a | grep {shlex.quote(container_name)}")
         if success and container_name in stdout:
-            # 删除已存在的容器
             self.ssh_service.execute_command(f"docker rm -f {shlex.quote(container_name)}")
-            import time
             time.sleep(2)
 
-        # 获取可用端口
         available_port = self.get_available_port()
+        self.ssh_service.execute_command(f"mkdir -p {shlex.quote(REPOS_ROOT)}")
 
-        # 确保卷目录存在
-        self.ssh_service.execute_command("mkdir -p /opt/automation/repos")
-
-        # 构建Docker run命令
         command = f"docker run -d --name {shlex.quote(container_name)}"
-
-        # 自动添加端口映射（使用可用端口）
         command += f" -p {available_port}:8000"
-
-        # 自动添加卷映射（代码仓库路径）
-        command += " -v /opt/automation/repos:/opt/automation/repos"
-
-        # 添加环境变量（值已通过serializer白名单校验，此处仍做quote防御）
+        command += f" -v {shlex.quote(REPOS_ROOT)}:{shlex.quote(REPOS_ROOT)}"
+        # 环境变量值已过serializer白名单校验，此处仍做quote防御
         if self.environment.variables:
             for key, value in self.environment.variables.items():
                 command += f" -e {shlex.quote(f'{key}={value}')}"
-
-        # 添加镜像
         command += f" {shlex.quote(self.environment.docker_image)}"
-
-        # 添加保持容器运行的命令（使用Python sleep，确保在Python镜像中可用）
         command += " python -c \"import time; time.sleep(999999)\""
-        
-        # 执行命令
+
         success, stdout, stderr = self.ssh_service.execute_command(command)
         if not success:
             return False, f"创建容器失败: {stderr}"
-        
-        # 检查容器是否创建成功并正在运行
-        import time
-        time.sleep(3)  # 等待容器启动
-        success, stdout, stderr = self.ssh_service.execute_command(f"docker ps | grep {container_name}")
-        if not success or container_name not in stdout:
-            return False, f"容器创建后未运行: {stderr}"
-        
-        return True, f"容器 {container_name} 创建成功（映射端口: {available_port}）"
-    
-    def start_container(self):
-        """启动Docker容器"""
-        container_name = f"automation-{self.environment.id}"
 
-        # 检查容器是否正在运行
+        logger.info('容器创建成功: %s', container_name)
+        return True, container_name
+
+    def start_container(self):
+        """启动Docker容器（不存在则创建，已停止则重建）"""
+        container_name = self.container_name
+
         success, stdout, stderr = self.ssh_service.execute_command(f"docker ps | grep {shlex.quote(container_name)}")
         if success and container_name in stdout:
-            print(f"容器已在运行: {container_name}")
             return True, "容器已经在运行"
 
-        # 检查容器是否存在（已停止）
         success, stdout, stderr = self.ssh_service.execute_command(f"docker ps -a | grep {shlex.quote(container_name)}")
         if not success or container_name not in stdout:
-            # 容器不存在，创建容器
-            print(f"容器不存在，创建容器: {container_name}")
             return self.create_container()
 
-        # 容器存在但已停止，删除后重新创建
-        print(f"容器存在但已停止，删除后重新创建: {container_name}")
         self.ssh_service.execute_command(f"docker rm -f {shlex.quote(container_name)}")
-        import time
         time.sleep(2)
         return self.create_container()
 
-    def execute_in_container(self, command):
-        """在Docker容器中执行命令"""
-        container_name = f"automation-{self.environment.id}"
+    def exec_in_container(self, inner_command):
+        """在容器内用bash执行命令（inner_command为完整shell语句），返回 (success, stdout, stderr)"""
+        docker_command = (
+            f"docker exec {shlex.quote(self.container_name)} "
+            f"bash -c {shlex.quote(inner_command)}"
+        )
+        return self.ssh_service.execute_command(docker_command)
 
-        # 确保容器正在运行
+    def execute_in_container(self, command):
+        """在容器内执行命令，解析尾部EXIT_CODE标记作为退出码"""
         success, message = self.start_container()
         if not success:
             return False, message, ""
 
-        # 首先安装pytest（如果尚未安装）
-        install_cmd = f"docker exec {shlex.quote(container_name)} bash -c 'pip install pytest allure-pytest -q'"
-        self.ssh_service.execute_command(install_cmd)
+        # 确保pytest可用（幂等，已安装时很快返回）
+        self.ssh_service.execute_command(
+            f"docker exec {shlex.quote(self.container_name)} bash -c 'pip install pytest allure-pytest -q'"
+        )
 
-        # 在容器中执行命令（带重试机制）
-        import time
         max_retries = 3
         retry_delay = 3
 
         for attempt in range(max_retries):
-            docker_command = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(command + '; echo EXIT_CODE:$?')}"
-            success, stdout, stderr = self.ssh_service.execute_command(docker_command)
-            
-            # 检查是否是容器未运行的错误
+            success, stdout, stderr = self.exec_in_container(command + '; echo EXIT_CODE:$?')
+
+            # 容器未运行时等待重试（可能是执行中被外部停止）
             if not success and 'container' in stderr.lower() and 'not running' in stderr.lower():
                 if attempt < max_retries - 1:
-                    # 等待后重试
                     time.sleep(retry_delay)
-                    # 尝试重新启动容器
                     restart_success, restart_msg = self.start_container()
                     if not restart_success:
                         return False, f"容器重启失败: {restart_msg}", stderr
                     continue
-                else:
-                    return False, "容器未运行，重试次数已用完", stderr
-            
+                return False, "容器未运行，重试次数已用完", stderr
+
             if not success:
                 return False, f"执行命令失败: {stderr}", ""
-            
-            # 成功执行，跳出重试循环
+
             break
-        
-        # 提取退出码
+
+        # 从输出末尾提取退出码标记
         exit_code = 0
         lines = stdout.split('\n')
         for line in reversed(lines):
             if line.startswith('EXIT_CODE:'):
                 try:
                     exit_code = int(line.split(':')[1].strip())
-                    # 移除退出码行
                     stdout = '\n'.join([l for l in lines if not l.startswith('EXIT_CODE:')])
-                    break
                 except ValueError:
                     pass
-        
-        # 如果退出码非零，返回失败
+                break
+
         if exit_code != 0:
             return False, stdout, stderr
-        
-        # 分析pytest输出，统计测试用例结果
-        test_summary = self._parse_pytest_output(stdout, stderr)
-        if test_summary['failed'] > 0:
+
+        # pytest统计行里有failed则视为失败
+        if self._parse_pytest_summary(stdout, stderr).get('failed', 0) > 0:
             return False, stdout, stderr
-        
+
         return True, stdout, stderr
-    
-    def _parse_pytest_output(self, stdout, stderr):
-        """分析pytest输出，统计测试用例结果"""
-        summary = {
-            'total': 0,
-            'passed': 0,
-            'failed': 0,
-            'skipped': 0
-        }
-        
-        # 合并stdout和stderr进行分析
-        output = stdout + '\n' + stderr
-        lines = output.split('\n')
-        
-        # 查找pytest总结行
-        for line in lines:
-            line = line.strip()
-            # 匹配pytest总结格式，例如："3 passed, 1 failed, 2 skipped in 1.23s"
+
+    @staticmethod
+    def _parse_pytest_summary(stdout, stderr):
+        """从pytest输出统计行解析用例结果计数"""
+        summary = {'total': 0, 'passed': 0, 'failed': 0, 'skipped': 0}
+        import re
+        for line in (stdout + '\n' + stderr).split('\n'):
             if 'passed' in line or 'failed' in line or 'skipped' in line:
-                # 提取数字
-                import re
-                # 匹配数字和状态的组合
                 matches = re.findall(r'(\d+)\s+(passed|failed|skipped)', line)
                 for count, status in matches:
-                    count = int(count)
-                    if status == 'passed':
-                        summary['passed'] = count
-                    elif status == 'failed':
-                        summary['failed'] = count
-                    elif status == 'skipped':
-                        summary['skipped'] = count
-                # 计算总数
+                    summary[status] = int(count)
                 summary['total'] = summary['passed'] + summary['failed'] + summary['skipped']
                 break
-        
         return summary
-    
+
     def close(self):
         """关闭SSH连接"""
         self.ssh_service.close()
@@ -411,552 +352,321 @@ class DockerService:
 
 class GitService:
     """Git服务类，用于拉取代码"""
-    
+
     def __init__(self, environment, execution=None):
         self.environment = environment
         self.execution = execution
         self.ssh_service = SSHService(environment, execution=execution)
-    
-    def get_repo_path(self, task):
-        """获取代码仓库路径"""
-        # 生成仓库目录名
+
+    @staticmethod
+    def get_repo_path(task):
+        """获取代码仓库路径：{REPOS_ROOT}/{仓库名}"""
         repo_name = task.git_repo.split('/')[-1].replace('.git', '')
-        # 代码保存路径：/opt/automation/repos/{repo_name}
-        repo_path = f"/opt/automation/repos/{repo_name}"
-        return repo_path
+        return f"{REPOS_ROOT}/{repo_name}"
 
     def clone_or_pull(self, task, retry_count=0):
-        """克隆或拉取代码，支持失败重试"""
+        """克隆或拉取代码并切到指定分支，支持失败重试，返回 (success, repo_path|错误信息)"""
         repo_path = self.get_repo_path(task)
         max_retry = 3
         retry_delay = 5
 
-        # 确保目录存在
-        success, stdout, stderr = self.ssh_service.execute_command(f"mkdir -p /opt/automation/repos")
+        success, stdout, stderr = self.ssh_service.execute_command(f"mkdir -p {shlex.quote(REPOS_ROOT)}")
         if not success:
             return False, f"创建目录失败: {stderr}"
 
-        # 检查仓库是否已存在
+        def _retry(action):
+            if retry_count < max_retry:
+                logger.warning('%s失败，重试 (%d/%d)...', action, retry_count + 1, max_retry)
+                time.sleep(retry_delay)
+                return self.clone_or_pull(task, retry_count + 1)
+            return None
+
         success, stdout, stderr = self.ssh_service.execute_command(f"ls -la {shlex.quote(repo_path)}")
 
         if 'No such file or directory' in stderr:
-            # 克隆仓库
             command = f"git -c ssh.ConnectTimeout=30 clone {shlex.quote(task.git_repo)} {shlex.quote(repo_path)}"
             success, stdout, stderr = self.ssh_service.execute_command(command)
             if not success:
-                if retry_count < max_retry:
-                    print(f"克隆仓库失败，尝试重试 ({retry_count + 1}/{max_retry})...")
-                    time.sleep(retry_delay)
-                    return self.clone_or_pull(task, retry_count + 1)
+                retried = _retry('克隆仓库')
+                if retried is not None:
+                    return retried
                 return False, f"克隆仓库失败: {stderr}"
         else:
-            # 拉取最新代码
             command = f"cd {shlex.quote(repo_path)} && git -c ssh.ConnectTimeout=30 pull origin {shlex.quote(task.git_branch)}"
             success, stdout, stderr = self.ssh_service.execute_command(command)
             if not success:
-                if retry_count < max_retry:
-                    print(f"拉取代码失败，尝试重试 ({retry_count + 1}/{max_retry})...")
-                    time.sleep(retry_delay)
-                    return self.clone_or_pull(task, retry_count + 1)
+                retried = _retry('拉取代码')
+                if retried is not None:
+                    return retried
                 return False, f"拉取代码失败: {stderr}"
 
-        # 切换到指定分支
         command = f"cd {shlex.quote(repo_path)} && git checkout {shlex.quote(task.git_branch)}"
         success, stdout, stderr = self.ssh_service.execute_command(command)
         if not success:
-            if retry_count < max_retry:
-                print(f"切换分支失败，尝试重试 ({retry_count + 1}/{max_retry})...")
-                time.sleep(retry_delay)
-                return self.clone_or_pull(task, retry_count + 1)
+            retried = _retry('切换分支')
+            if retried is not None:
+                return retried
             return False, f"切换分支失败: {stderr}"
-        
+
         return True, repo_path
-    
+
     def close(self):
         """关闭SSH连接"""
         self.ssh_service.close()
 
 
-def execute_task_on_remote(task, environment, execution=None):
-    """在远程执行机上执行任务"""
-    docker_service = DockerService(environment, execution=execution)
-    
-    def log_info(message, context=None):
-        """记录信息日志"""
-        if execution:
-            from .tasks import log_info_with_context
-            log_info_with_context(execution, message, context)
-        print(f"INFO: {message}")
-    
-    def log_error(message, exception=None, context=None):
-        """记录错误日志"""
-        if execution:
-            from .tasks import log_error_with_stack
-            log_error_with_stack(execution, message, exception, context)
-        print(f"ERROR: {message}")
-    
-    def log_warning(message, context=None):
-        """记录警告日志"""
-        if execution:
-            from .tasks import log_warning_with_context
-            log_warning_with_context(execution, message, context)
-        print(f"WARNING: {message}")
-    
-    try:
-        # 确保Docker服务运行
-        success, message = docker_service.ensure_docker_running()
-        if not success:
-            return False, message, ""
-        
-        # 启动容器
-        success, message = docker_service.start_container()
-        if not success:
-            return False, message, ""
-        log_info(f"容器启动成功: {message}", context={'container_message': message})
-        
-        # 检查容器状态
-        container_name = f"automation-{environment.id}"
-        check_container_cmd = f"docker ps | grep {shlex.quote(container_name)}"
-        success, stdout, stderr = docker_service.ssh_service.execute_command(check_container_cmd)
-        if success and container_name in stdout:
-            log_info(f"容器正在运行: {stdout}", context={'container_name': container_name, 'status': 'running'})
-        else:
-            log_warning(f"容器可能未运行: {stderr}", context={'container_name': container_name, 'status': 'not_running'})
-        
-        # 检查容器内卷映射目录
-        check_volume_cmd = f"docker exec {shlex.quote(container_name)} bash -c 'ls -la /opt/automation/repos'"
-        success, stdout, stderr = docker_service.ssh_service.execute_command(check_volume_cmd)
-        if success:
-            log_info(f"容器内卷映射目录内容: {stdout}", context={'volume_path': '/opt/automation/repos', 'content': stdout[:200]})
-        else:
-            log_warning(f"容器内卷映射目录检查失败: {stderr}", context={'volume_path': '/opt/automation/repos', 'error': stderr})
-        
-        # 脚本路径信息
-        script_path = task.script_path
-        repo_path = None
-        
-        # 确保脚本路径使用Linux路径分隔符（处理Windows路径）
-        if script_path:
-            script_path = script_path.replace('\\', '/')
-        
-        log_info(f"任务脚本原始路径: {task.script_path}", context={'original_script_path': task.script_path})
-        log_info(f"转换后脚本路径: {script_path}", context={'converted_script_path': script_path})
-        log_info(f"任务脚本来源: {task.script_source}", context={'script_source': task.script_source})
-        log_info(f"Git仓库: {task.git_repo if task.git_repo else 'N/A'}", context={'git_repo': task.git_repo})
-        
-        # 如果是Git仓库，拉取代码
-        
-        if task.git_repo and (not task.script_source or task.script_source == 'git'):
-            git_service = GitService(environment, execution=execution)
-            try:
-                log_info(f"开始Git操作: 克隆或拉取代码", context={'git_repo': task.git_repo, 'git_branch': task.git_branch})
-                success, repo_path = git_service.clone_or_pull(task)
-                if not success:
-                    log_error(f"Git操作失败: {repo_path}", context={'git_repo': task.git_repo, 'error': repo_path})
-                    return False, repo_path, ""
-                log_info(f"Git操作成功: {repo_path}", context={'repo_path': repo_path})
-                
-                # 更新脚本路径为仓库中的路径（使用Linux路径分隔符）
-                # 如果script_path不是绝对路径，则与repo_path拼接
-                if script_path.startswith('/'):
-                    log_info(f"脚本路径已经是绝对路径: {script_path}", context={'script_path': script_path})
-                    # 检查宿主机上文件是否存在
-                    host_check_cmd = f"ls -la {shlex.quote(script_path)}"
-                    success, host_stdout, host_stderr = docker_service.ssh_service.execute_command(host_check_cmd)
-                    if not success or 'No such file or directory' in host_stderr:
-                        log_warning(f"宿主机上脚本文件不存在: {script_path}", context={'script_path': script_path, 'error': host_stderr})
-                    else:
-                        log_info(f"宿主机上脚本文件存在: {host_stdout}", context={'script_path': script_path, 'file_info': host_stdout[:100]})
-                else:
-                    # 移除script_path开头的斜杠，然后与repo_path拼接
-                    script_path = repo_path.rstrip('/') + '/' + script_path.lstrip('/')
-                    log_info(f"Git仓库路径: {repo_path}", context={'repo_path': repo_path})
-                    log_info(f"拼接后脚本路径: {script_path}", context={'script_path': script_path})
-                    # 确保拼接后是绝对路径
-                    if not script_path.startswith('/'):
-                        script_path = '/' + script_path
-                        log_info(f"修正为绝对路径: {script_path}", context={'script_path': script_path})
-                    # 检查宿主机上文件是否存在
-                    host_check_cmd = f"ls -la {shlex.quote(script_path)}"
-                    success, host_stdout, host_stderr = docker_service.ssh_service.execute_command(host_check_cmd)
-                    if not success or 'No such file or directory' in host_stderr:
-                        log_warning(f"宿主机上脚本文件不存在: {script_path}", context={'script_path': script_path, 'error': host_stderr})
-                    else:
-                        log_info(f"宿主机上脚本文件存在: {host_stdout}", context={'script_path': script_path, 'file_info': host_stdout[:100]})
-            finally:
-                git_service.close()
-        
-        # 依赖管理：检查并安装依赖
-        if not repo_path:
-            repo_path = '.'
-        requirements_path = f"{repo_path}/requirements.txt"
-        
-        # 对于非Git任务，确保script_path是绝对路径或正确处理
-        if not task.script_source == 'git' and script_path:
-            if not script_path.startswith('/'):
-                # 对于非Git任务，保持相对路径，让pytest在当前工作目录中查找
-                log_info(f"非Git任务，使用相对路径: {script_path}", context={'script_path': script_path, 'task_type': 'non_git'})
-            else:
-                log_info(f"非Git任务，使用绝对路径: {script_path}", context={'script_path': script_path, 'task_type': 'non_git'})
-        
-        # 检查脚本文件是否存在（在容器内检查）
-        container_name = f"automation-{environment.id}"
-        log_info(f"检查容器内脚本文件是否存在: {script_path}", context={'script_path': script_path, 'container_name': container_name})
-        log_info(f"容器名称: {container_name}", context={'container_name': container_name})
-        
-        if script_path:
-            # 在容器内检查文件是否存在
-            check_script_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + script_path)}"
-            success, stdout, stderr = docker_service.ssh_service.execute_command(check_script_cmd)
-            if not success or 'No such file or directory' in stderr:
-                error_msg = f"脚本文件在容器内不存在: {script_path}"
-                log_error(error_msg, context={'script_path': script_path, 'container_name': container_name, 'error': stderr})
-                log_error(f"容器检查错误详情: {stderr}", context={'container_name': container_name, 'error': stderr})
-                
-                # 检查容器内的卷映射目录
-                log_info(f"检查容器内卷映射目录: /opt/automation/repos", context={'volume_path': '/opt/automation/repos'})
-                check_volume_cmd = f"docker exec {shlex.quote(container_name)} bash -c 'ls -la /opt/automation/repos'"
-                _, volume_stdout, volume_stderr = docker_service.ssh_service.execute_command(check_volume_cmd)
-                log_info(f"容器内/opt/automation/repos目录内容: {volume_stdout}", context={'volume_path': '/opt/automation/repos', 'content': volume_stdout[:200]})
-                
-                # 如果是Git任务，列出仓库目录内容以帮助调试
-                if task.script_source == 'git' and repo_path:
-                    # 在容器内查找Python文件
-                    find_cmd_inner = 'find ' + repo_path + ' -type f -name "*.py" | head -20'
-                    list_repo_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(find_cmd_inner)}"
-                    _, list_stdout, _ = docker_service.ssh_service.execute_command(list_repo_cmd)
-                    log_info(f"容器内仓库中的Python文件: {list_stdout}", context={'repo_path': repo_path, 'python_files': list_stdout[:200]})
-                    # 列出脚本路径的父目录
-                    import os
-                    script_dir = os.path.dirname(script_path) if '/' in script_path else repo_path
-                    list_dir_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + script_dir)}"
-                    _, dir_stdout, _ = docker_service.ssh_service.execute_command(list_dir_cmd)
-                    log_info(f"容器内脚本所在目录内容: {dir_stdout}", context={'script_dir': script_dir, 'content': dir_stdout[:200]})
+class TaskExecutor:
+    """任务执行编排：拉代码→起容器→装依赖→执行pytest→收集结果"""
 
-                    # 同时在宿主机上检查，对比结果
-                    log_info(f"同时在宿主机上检查脚本路径: {script_path}", context={'script_path': script_path})
-                    host_check_cmd = f"ls -la {shlex.quote(script_path)}"
-                    _, host_stdout, host_stderr = docker_service.ssh_service.execute_command(host_check_cmd)
-                    if 'No such file or directory' in host_stderr:
-                        log_warning(f"宿主机上文件也不存在，可能是路径错误或代码未拉取", context={'script_path': script_path, 'error': host_stderr})
-                    else:
-                        log_warning(f"宿主机上文件存在，但容器内看不到，可能是卷映射问题", context={'script_path': script_path, 'host_file_info': host_stdout[:100]})
-                        log_info(f"宿主机文件信息: {host_stdout}", context={'script_path': script_path, 'host_file_info': host_stdout[:100]})
-                return False, error_msg, stderr
-            else:
-                log_info(f"容器内脚本文件存在: {stdout}", context={'script_path': script_path, 'file_info': stdout[:100]})
-        else:
-            log_warning("script_path为空", context={'script_path': script_path})
-        
-        # 检查requirements.txt文件是否存在
-        check_requirements_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + requirements_path)}"
-        success, stdout, stderr = docker_service.ssh_service.execute_command(check_requirements_cmd)
-        
-        if 'No such file or directory' not in stderr:
-            log_info(f"发现依赖文件: {requirements_path}", context={'requirements_path': requirements_path})
-            
-            # 检查依赖是否需要更新（基于文件哈希）
-            hash_file_path = f"{repo_path}/.last_install_hash"
-            
-            # 计算当前requirements.txt的MD5哈希
-            calc_hash_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('md5sum ' + requirements_path + ' 2>/dev/null || md5 ' + requirements_path + ' 2>/dev/null || echo no_hash')}"
-            success, hash_out, hash_err = docker_service.ssh_service.execute_command(calc_hash_cmd)
-            current_hash = hash_out.split()[0] if success and hash_out.strip() and 'no_hash' not in hash_out else "unknown"
+    def __init__(self, environment, execution=None):
+        self.environment = environment
+        self.execution = execution
+        self.docker_service = DockerService(environment, execution=execution)
 
-            # 读取上次安装的哈希值
-            read_hash_inner = 'cat ' + hash_file_path + ' 2>/dev/null || echo ""'
-            read_hash_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(read_hash_inner)}"
-            success, last_hash_out, last_hash_err = docker_service.ssh_service.execute_command(read_hash_cmd)
-            last_hash = last_hash_out.strip() if success else ""
-            
-            log_info(f"依赖文件哈希检查 - 当前: {current_hash}, 上次: {last_hash}", context={'current_hash': current_hash, 'last_hash': last_hash, 'requirements_path': requirements_path})
-            
-            # 如果哈希不同或未知，安装依赖
-            if current_hash != "unknown" and current_hash != last_hash:
-                log_info("依赖文件有更新，开始安装依赖包...", context={'requirements_path': requirements_path})
-                install_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cd ' + repo_path + ' && pip install -r requirements.txt')}"
-                success, install_stdout, install_stderr = docker_service.ssh_service.execute_command(install_cmd)
-                if not success:
-                    error_msg = f"安装依赖失败: {install_stderr}"
-                    log_error(error_msg, context={'requirements_path': requirements_path, 'error': install_stderr})
-                    # 即使依赖安装失败，也继续执行测试
-                    log_warning("依赖安装失败，继续执行测试", context={'requirements_path': requirements_path})
-                else:
-                    log_info("依赖安装完成", context={'requirements_path': requirements_path, 'output': install_stdout[:300]})
-                    # 保存安装哈希
-                    if current_hash != "unknown":
-                        save_hash_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('echo ' + shlex.quote(current_hash) + ' > ' + hash_file_path)}"
-                        docker_service.ssh_service.execute_command(save_hash_cmd)
-                        log_info(f"已保存依赖安装哈希: {current_hash}", context={'hash_file': hash_file_path, 'hash': current_hash})
-                    if install_stdout:
-                        print(f"[依赖安装] 输出: {install_stdout[:300]}..." if len(install_stdout) > 300 else f"[依赖安装] 输出: {install_stdout}")
-            else:
-                if current_hash == "unknown":
-                    log_warning("无法计算依赖文件哈希，跳过依赖检查", context={'requirements_path': requirements_path})
-                    # 未知哈希时仍然安装依赖以确保环境一致
-                    log_info("开始安装依赖包（哈希未知）...", context={'requirements_path': requirements_path})
-                    install_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cd ' + repo_path + ' && pip install -r requirements.txt')}"
-                    success, install_stdout, install_stderr = docker_service.ssh_service.execute_command(install_cmd)
-                    if not success:
-                        error_msg = f"安装依赖失败: {install_stderr}"
-                        log_error(error_msg, context={'requirements_path': requirements_path, 'error': install_stderr})
-                        log_warning("依赖安装失败，继续执行测试", context={'requirements_path': requirements_path})
-                    else:
-                        log_info("依赖安装完成", context={'requirements_path': requirements_path, 'output': install_stdout[:300]})
-                else:
-                    log_info("依赖文件无更新，跳过安装", context={'requirements_path': requirements_path, 'hash': current_hash})
-        else:
-            log_info(f"未发现依赖文件: {requirements_path}", context={'requirements_path': requirements_path})
-        
-        # 创建core模块以解决导入错误
-        # 构建命令时避免在f-string中使用反斜杠
-        core_dir = f"{repo_path}/core"
-        logger_py = f"{core_dir}/logger.py"
-        command_executor_py = f"{core_dir}/command_executor.py"
-        
-        # 构建logger.py内容
-        logger_content = "import logging\nlogger = logging.getLogger(__name__)"
-        
-        # 构建command_executor.py内容
-        executor_content = """import logging
-logger = logging.getLogger(__name__)
+    def _log(self, level, message, context=None, exception=None):
+        """同时输出到执行日志（DB）与python logging"""
+        if self.execution:
+            from .tasks import log_with_context
+            log_with_context(self.execution, level.upper(), message, exception=exception, context=context)
+        getattr(logger, level)(message)
 
-class CommandExecutor:
-    def connect(self):
-        logger.info("Connected to executor")
-    def disconnect(self):
-        logger.info("Disconnected from executor")
-    def run(self, command):
-        logger.info(f"Running command: {command}")
-        # 返回模拟结果
-        return {"code": 0, "stdout": "test", "stderr": ""}
-"""
-        
-        # 构建完整的命令
-        # 分开执行命令，避免here-document的语法问题
-        create_core_dir_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('mkdir -p ' + core_dir)}"
+    def _log_info(self, message, context=None):
+        self._log('info', message, context)
 
-        # 使用echo命令的不同格式来避免引号冲突
-        create_logger_inner = 'cat > ' + logger_py + ' << EOF\n' + logger_content + '\nEOF'
-        create_logger_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(create_logger_inner)}"
-        create_executor_inner = 'cat > ' + command_executor_py + ' << EOF\n' + executor_content + '\nEOF'
-        create_executor_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(create_executor_inner)}"
-        
-        # 执行命令
-        success, create_stdout, create_stderr = docker_service.ssh_service.execute_command(create_core_dir_cmd)
-        if success:
-            success, create_stdout, create_stderr = docker_service.ssh_service.execute_command(create_logger_cmd)
-            if success:
-                success, create_stdout, create_stderr = docker_service.ssh_service.execute_command(create_executor_cmd)
-        if success:
-            log_info("创建core模块成功", context={'repo_path': repo_path})
-        else:
-            log_warning("创建core模块失败", context={'repo_path': repo_path, 'error': create_stderr})
-        
-        # 构建执行命令（平台内部处理）
-        log_info(f"最终repo_path: {repo_path}", context={'repo_path': repo_path})
-        log_info(f"最终script_path: {script_path}", context={'script_path': script_path})
-        
-        # 调试：检查容器内当前目录和文件
-        debug_cmd1 = f"docker exec {shlex.quote(container_name)} bash -c 'pwd && ls -la'"
-        success, debug_out1, debug_err1 = docker_service.ssh_service.execute_command(debug_cmd1)
-        log_info(f"容器内当前目录: {debug_out1}", context={'container_name': container_name, 'current_dir': debug_out1[:100]})
+    def _log_warning(self, message, context=None):
+        self._log('warning', message, context)
 
-        debug_cmd2 = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + script_path)}"
-        success, debug_out2, debug_err2 = docker_service.ssh_service.execute_command(debug_cmd2)
-        if success:
-            log_info(f"脚本文件存在: {debug_out2}", context={'script_path': script_path, 'file_info': debug_out2[:100]})
-        else:
-            log_error(f"脚本文件不存在: {debug_err2}", context={'script_path': script_path, 'error': debug_err2})
-            
-        find_cmd_inner = 'find ' + repo_path + ' -name "*.py" | head -5'
-        debug_cmd3 = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(find_cmd_inner)}"
-        success, debug_out3, debug_err3 = docker_service.ssh_service.execute_command(debug_cmd3)
-        if success:
-            log_info(f"仓库内Python文件: {debug_out3}", context={'repo_path': repo_path, 'python_files': debug_out3[:200]})
-        
-        # 确保pytest从仓库根目录执行
-        # 直接在仓库根目录执行pytest，确保工作目录正确
-        # 使用相对路径，确保pytest能正确找到测试文件
-        # 计算相对路径
+    def _log_error(self, message, context=None, exception=None):
+        self._log('error', message, context, exception=exception)
+
+    def _resolve_script_path(self, task, repo_path):
+        """把任务配置的script_path解析为容器内绝对路径"""
+        script_path = (task.script_path or '').replace('\\', '/')
+
         if script_path.startswith('/'):
-            # 绝对路径，计算相对于repo_path的路径
-            if script_path.startswith(repo_path):
-                relative_script_path = script_path[len(repo_path):].lstrip('/')
-            else:
-                # 使用os.path.relpath作为备选
-                relative_script_path = os.path.relpath(script_path, repo_path)
-        else:
-            # 已经是相对路径
-            relative_script_path = script_path
-        
-        log_info(f"相对脚本路径: {relative_script_path}", context={'relative_script_path': relative_script_path})
-        
-        # 调试：检查pytest.ini文件
-        debug_pytest_ini_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('find ' + repo_path + ' -name pytest.ini -type f 2>/dev/null | head -5')}"
-        success, debug_out, debug_err = docker_service.ssh_service.execute_command(debug_pytest_ini_cmd)
-        if success and debug_out.strip():
-            log_info(f"找到pytest.ini文件: {debug_out}", context={'pytest_ini_files': debug_out})
-            # 读取每个pytest.ini文件的内容
-            for file_path in debug_out.strip().split('\n'):
-                if file_path.strip():
-                    read_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cat ' + file_path.strip())}"
-                    success, content, err = docker_service.ssh_service.execute_command(read_cmd)
-                    if success:
-                        log_info(f"pytest.ini文件内容 ({file_path}): {content[:500]}", context={'pytest_ini_path': file_path, 'content_preview': content[:500]})
-                    else:
-                        log_warning(f"无法读取pytest.ini文件: {file_path}", context={'pytest_ini_path': file_path, 'error': err})
-        else:
-            log_info("未找到pytest.ini文件", context={'repo_path': repo_path})
+            return script_path
 
-        # 确保在仓库根目录创建pytest.ini文件，设置正确的rootdir
-        pytest_ini_path = f"{repo_path}/pytest.ini"
-        create_pytest_ini_inner = 'printf "[pytest]\\nrootdir = ." > ' + pytest_ini_path
-        create_pytest_ini_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(create_pytest_ini_inner)}"
-        success, create_out, create_err = docker_service.ssh_service.execute_command(create_pytest_ini_cmd)
-        if success:
-            log_info(f"已创建pytest.ini文件: {pytest_ini_path}", context={'pytest_ini_path': pytest_ini_path})
-        else:
-            log_warning(f"创建pytest.ini文件失败: {create_err}", context={'pytest_ini_path': pytest_ini_path, 'error': create_err})
+        if repo_path:
+            # 相对路径拼接到仓库根
+            return repo_path.rstrip('/') + '/' + script_path.lstrip('/')
+        return script_path
 
-        # 清理可能干扰的pytest配置和缓存
-        # 1. 查找并删除test_cases目录中的pytest.ini文件（如果存在）
-        test_cases_pytest_ini = f"{repo_path}/test_cases/pytest.ini"
-        remove_test_cases_ini_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('rm -f ' + test_cases_pytest_ini)}"
-        success, remove_out, remove_err = docker_service.ssh_service.execute_command(remove_test_cases_ini_cmd)
-        if success:
-            log_info(f"已清理test_cases目录中的pytest.ini文件", context={'pytest_ini_path': test_cases_pytest_ini})
-        else:
-            log_info(f"test_cases目录中无pytest.ini文件或清理失败: {remove_err}", context={'pytest_ini_path': test_cases_pytest_ini, 'error': remove_err})
+    def _install_requirements(self, repo_path):
+        """依赖安装：requirements.txt内容变化时才重装（按MD5哈希判断）"""
+        container = self.docker_service.container_name
+        requirements_path = f"{repo_path}/requirements.txt"
+        hash_file = f"{repo_path}/.last_install_hash"
 
-        # 2. 清理pytest缓存
-        clean_cache_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cd ' + repo_path + ' && rm -rf .pytest_cache')}"
-        docker_service.ssh_service.execute_command(clean_cache_cmd)
-        log_info("已清理pytest缓存", context={'repo_path': repo_path})
+        success, stdout, stderr = self.docker_service.exec_in_container('ls ' + shlex.quote(requirements_path))
+        if not success or 'No such file or directory' in stderr:
+            self._log_info(f"未发现依赖文件: {requirements_path}",
+                           context={'requirements_path': requirements_path})
+            return
 
-        # 3. 验证我们创建的pytest.ini文件
-        verify_ini_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cat ' + pytest_ini_path)}"
-        success, verify_out, verify_err = docker_service.ssh_service.execute_command(verify_ini_cmd)
-        if success:
-            log_info(f"验证pytest.ini文件内容: {verify_out}", context={'pytest_ini_path': pytest_ini_path, 'content': verify_out})
-        else:
-            log_warning(f"无法验证pytest.ini文件: {verify_err}", context={'pytest_ini_path': pytest_ini_path, 'error': verify_err})
+        calc_inner = ('md5sum ' + shlex.quote(requirements_path) + ' 2>/dev/null || md5 '
+                      + shlex.quote(requirements_path) + ' 2>/dev/null || echo no_hash')
+        success, hash_out, _ = self.docker_service.exec_in_container(calc_inner)
+        current_hash = hash_out.split()[0] if success and hash_out.strip() and 'no_hash' not in hash_out else "unknown"
 
-        # 构建详细的执行命令，添加-v选项获取更详细的输出
-        # Allure结果目录按execution隔离，避免同一容器并发执行时 --clean-alluredir 互相清掉结果
-        remote_result_dir_name = f'result_{execution.id}' if execution else 'result'
-        execution_command = f"cd {shlex.quote(repo_path)} && export PYTHONPATH={shlex.quote(repo_path)} && python -m pytest {shlex.quote(relative_script_path)} --alluredir={shlex.quote('./' + remote_result_dir_name)} --clean-alluredir --rootdir={shlex.quote(repo_path)} --override-ini=rootdir={shlex.quote(repo_path)} -v"
-        
-        # 添加调试信息：直接尝试导入测试文件
-        log_info("开始执行调试导入命令", context={'repo_path': repo_path})
-        _debug_module = relative_script_path[:-3] if relative_script_path.endswith('.py') else relative_script_path
-        _debug_module = _debug_module.replace('/', '.')
-        _debug_python_code = (
-            "import sys, os, importlib, traceback; "
-            "print('Python path:', sys.path); "
-            "print('Current directory:', os.getcwd()); "
-            "print('Attempting to import test file...'); "
-            f"try: importlib.import_module('{_debug_module}'); print('Import successful!'); "
-            "except Exception as e: print('Import error:', str(e)); traceback.print_exc()"
-        )
-        debug_import_cmd = 'cd ' + shlex.quote(repo_path) + ' && export PYTHONPATH=' + shlex.quote(repo_path) + ' && python -c ' + shlex.quote(_debug_python_code)
-        log_info(f"调试导入命令: {debug_import_cmd}", context={'debug_import_cmd': debug_import_cmd})
+        read_inner = 'cat ' + shlex.quote(hash_file) + ' 2>/dev/null || echo ""'
+        success, last_hash_out, _ = self.docker_service.exec_in_container(read_inner)
+        last_hash = last_hash_out.strip() if success else ""
 
-        # 执行调试导入命令
-        log_info("执行调试导入命令", context={'container_name': container_name})
-        success, import_stdout, import_stderr = docker_service.ssh_service.execute_command(f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(debug_import_cmd)}")
-        
-        if success:
-            log_info(f"调试导入成功: {import_stdout}", context={'import_stdout': import_stdout})
-        else:
-            log_error(f"调试导入失败: {import_stderr}", context={'import_stderr': import_stderr, 'import_stdout': import_stdout})
-        
-        # 额外的调试：检查test_cases目录结构
-        log_info("检查test_cases目录结构", context={'repo_path': repo_path})
-        check_dir_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + repo_path + '/test_cases')}"
-        success, dir_stdout, dir_stderr = docker_service.ssh_service.execute_command(check_dir_cmd)
-        if success:
-            log_info(f"test_cases目录结构: {dir_stdout}", context={'dir_stdout': dir_stdout})
-        else:
-            log_error(f"检查test_cases目录失败: {dir_stderr}", context={'dir_stderr': dir_stderr})
-        
-        # 检查test_cases目录是否有__init__.py文件
-        log_info("检查test_cases目录是否有__init__.py文件", context={'repo_path': repo_path})
-        check_init_inner = 'ls -la ' + repo_path + '/test_cases/__init__.py 2>/dev/null || echo "No __init__.py file"'
-        check_init_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(check_init_inner)}"
-        success, init_stdout, init_stderr = docker_service.ssh_service.execute_command(check_init_cmd)
-        if success:
-            log_info(f"test_cases目录__init__.py文件检查: {init_stdout}", context={'init_stdout': init_stdout})
-        else:
-            log_error(f"检查test_cases目录__init__.py文件失败: {init_stderr}", context={'init_stderr': init_stderr})
-        
-        # 检查system_test目录结构
-        log_info("检查system_test目录结构", context={'repo_path': repo_path})
-        check_system_test_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + repo_path + '/test_cases/system_test')}"
-        success, system_test_stdout, system_test_stderr = docker_service.ssh_service.execute_command(check_system_test_cmd)
-        if success:
-            log_info(f"system_test目录结构: {system_test_stdout}", context={'system_test_stdout': system_test_stdout})
-        else:
-            log_error(f"检查system_test目录失败: {system_test_stderr}", context={'system_test_stderr': system_test_stderr})
-        
-        # 检查system_test目录是否有__init__.py文件
-        log_info("检查system_test目录是否有__init__.py文件", context={'repo_path': repo_path})
-        check_system_test_init_inner = 'ls -la ' + repo_path + '/test_cases/system_test/__init__.py 2>/dev/null || echo "No __init__.py file"'
-        check_system_test_init_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(check_system_test_init_inner)}"
-        success, system_test_init_stdout, system_test_init_stderr = docker_service.ssh_service.execute_command(check_system_test_init_cmd)
-        if success:
-            log_info(f"system_test目录__init__.py文件检查: {system_test_init_stdout}", context={'system_test_init_stdout': system_test_init_stdout})
-        else:
-            log_error(f"检查system_test目录__init__.py文件失败: {system_test_init_stderr}", context={'system_test_init_stderr': system_test_stderr})
-        
-        # 检查test_home_file.py文件内容
-        log_info("检查test_home_file.py文件内容", context={'repo_path': repo_path})
-        check_file_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cat ' + repo_path + '/test_cases/system_test/test_home_file.py')}"
-        success, file_stdout, file_stderr = docker_service.ssh_service.execute_command(check_file_cmd)
-        if success:
-            log_info(f"test_home_file.py文件内容: {file_stdout[:500]}", context={'file_stdout': file_stdout[:500]})
-        else:
-            log_error(f"检查test_home_file.py文件失败: {file_stderr}", context={'file_stderr': file_stderr})
-        
-        # 直接在容器中执行调试命令，获取详细的导入错误信息
-        log_info("执行调试导入命令", context={'repo_path': repo_path})
-        # 使用简单的命令来测试导入（模块名由相对脚本路径推导，去扩展名后按包路径导入）
-        _debug_module = relative_script_path[:-3] if relative_script_path.endswith('.py') else relative_script_path
-        _debug_module = _debug_module.replace('/', '.')
-        _debug_python_code = (
-            "import sys, os, importlib, traceback; "
-            "print('Python path:', sys.path); "
-            "print('Current directory:', os.getcwd()); "
-            f"print('Attempting to import test file...'); "
-            f"try: importlib.import_module('{_debug_module}'); print('Import successful!'); "
-            "except Exception as e: print('Import error:', str(e)); traceback.print_exc()"
-        )
-        debug_cmd = (
-            f"docker exec {shlex.quote(container_name)} bash -c "
-            + shlex.quote('cd ' + repo_path + ' && export PYTHONPATH=' + repo_path + ' && python -c ' + shlex.quote(_debug_python_code))
-        )
-        # 执行调试命令
-        success, debug_stdout, debug_stderr = docker_service.ssh_service.execute_command(debug_cmd)
-        if success:
-            log_info(f"调试导入命令执行成功: {debug_stdout}", context={'debug_stdout': debug_stdout})
-        else:
-            log_error(f"调试导入命令执行失败: {debug_stderr}", context={'debug_stderr': debug_stderr, 'debug_stdout': debug_stdout})
+        self._log_info(f"依赖文件哈希检查 - 当前: {current_hash}, 上次: {last_hash}",
+                       context={'current_hash': current_hash, 'last_hash': last_hash})
 
-        log_info(f"执行命令: {execution_command}", context={'execution_command': execution_command})
+        if current_hash == 'unknown':
+            # 无法计算哈希时直接安装，保证环境一致
+            self._log_info("无法计算依赖文件哈希，开始安装依赖包...",
+                           context={'requirements_path': requirements_path})
+        elif current_hash == last_hash:
+            self._log_info("依赖文件无更新，跳过安装",
+                           context={'requirements_path': requirements_path})
+            return
+        else:
+            self._log_info("依赖文件有更新，开始安装依赖包...",
+                           context={'requirements_path': requirements_path})
 
-        # 在容器中执行命令
-        success, stdout, stderr = docker_service.execute_in_container(execution_command)
+        install_inner = 'cd ' + shlex.quote(repo_path) + ' && pip install -r requirements.txt'
+        success, install_stdout, install_stderr = self.docker_service.exec_in_container(install_inner)
         if not success:
-            # 如果是执行失败，stdout 可能包含错误信息
-            error_message = stdout if stdout else (stderr if stderr else '未知错误')
-            return False, error_message, stderr
+            # 依赖装不上时继续跑测试，让失败信息暴露在测试输出里
+            self._log_error(f"安装依赖失败: {install_stderr}",
+                            context={'requirements_path': requirements_path, 'error': install_stderr})
+            self._log_warning("依赖安装失败，继续执行测试",
+                              context={'requirements_path': requirements_path})
+            return
 
-        # 收集Allure报告
-        report_dir = f"{repo_path}/{remote_result_dir_name}"
-        check_report_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + report_dir)}"
-        docker_service.ssh_service.execute_command(check_report_cmd)
-        
-        # 返回执行结果和报告信息
-        return True, stdout, stderr
-    finally:
-        docker_service.close()
+        self._log_info("依赖安装完成",
+                       context={'requirements_path': requirements_path, 'output': install_stdout[:300]})
+        if current_hash != 'unknown':
+            save_inner = 'echo ' + shlex.quote(current_hash) + ' > ' + shlex.quote(hash_file)
+            self.docker_service.exec_in_container(save_inner)
+            self._log_info(f"已保存依赖安装哈希: {current_hash}",
+                           context={'hash_file': hash_file})
+
+    def _prepare_pytest_env(self, repo_path):
+        """写pytest.ini固定rootdir、清pytest缓存，避免仓库内其他配置干扰"""
+        container = self.docker_service.container_name
+        pytest_ini = f"{repo_path}/pytest.ini"
+
+        create_ini_inner = 'printf "[pytest]\\nrootdir = ." > ' + shlex.quote(pytest_ini)
+        success, _, err = self.docker_service.exec_in_container(create_ini_inner)
+        if success:
+            self._log_info(f"已创建pytest.ini: {pytest_ini}", context={'pytest_ini_path': pytest_ini})
+        else:
+            self._log_warning(f"创建pytest.ini失败: {err}",
+                              context={'pytest_ini_path': pytest_ini, 'error': err})
+
+        clean_inner = 'cd ' + shlex.quote(repo_path) + ' && rm -rf .pytest_cache'
+        self.docker_service.exec_in_container(clean_inner)
+
+    def _relative_script_path(self, script_path, repo_path):
+        """计算pytest用的相对脚本路径（相对仓库根，保证rootdir语义正确）"""
+        if not script_path.startswith('/'):
+            return script_path
+        if repo_path and script_path.startswith(repo_path):
+            return script_path[len(repo_path):].lstrip('/')
+        return os.path.relpath(script_path, repo_path or '.')
+
+    def execute(self, task):
+        """执行任务主流程，返回 (success, stdout, stderr)"""
+        docker_service = self.docker_service
+        try:
+            # 1. Docker就绪
+            success, message = docker_service.ensure_docker_running()
+            if not success:
+                return False, message, ""
+
+            # 2. 容器就绪
+            success, message = docker_service.start_container()
+            if not success:
+                return False, message, ""
+            self._log_info(f"容器就绪: {message}", context={'container': docker_service.container_name})
+
+            # 3. 拉取代码（Git任务）
+            script_path = (task.script_path or '').replace('\\', '/')
+            repo_path = None
+            if task.git_repo and (not task.script_source or task.script_source == 'git'):
+                git_service = GitService(self.environment, execution=self.execution)
+                try:
+                    self._log_info("开始Git操作: 克隆或拉取代码",
+                                   context={'git_repo': task.git_repo, 'git_branch': task.git_branch})
+                    success, repo_path = git_service.clone_or_pull(task)
+                    if not success:
+                        self._log_error(f"Git操作失败: {repo_path}",
+                                        context={'git_repo': task.git_repo, 'error': repo_path})
+                        return False, repo_path, ""
+                    self._log_info(f"Git操作成功: {repo_path}", context={'repo_path': repo_path})
+                finally:
+                    git_service.close()
+
+            script_path = self._resolve_script_path(task, repo_path)
+            self._log_info(f"脚本路径: {script_path}",
+                           context={'script_path': script_path, 'repo_path': repo_path})
+
+            if not repo_path:
+                repo_path = '.'
+
+            # 4. 容器内校验脚本存在（快速失败，输出目录内容辅助定位）
+            if script_path and script_path.startswith('/'):
+                check_inner = 'ls ' + shlex.quote(script_path)
+                success, stdout, stderr = docker_service.exec_in_container(check_inner)
+                if not success or 'No such file or directory' in stderr:
+                    self._log_error(f"脚本文件在容器内不存在: {script_path}",
+                                    context={'script_path': script_path, 'error': stderr})
+                    list_inner = 'ls -la ' + shlex.quote(os.path.dirname(script_path) or REPOS_ROOT)
+                    _, dir_stdout, _ = docker_service.exec_in_container(list_inner)
+                    self._log_info(f"脚本所在目录内容: {dir_stdout[:300]}",
+                                   context={'script_dir': os.path.dirname(script_path)})
+                    return False, f"脚本文件在容器内不存在: {script_path}", stderr
+
+            # 5. 依赖安装（哈希判断增量）
+            self._install_requirements(repo_path if repo_path != '.' else REPOS_ROOT)
+
+            # 6. pytest环境准备
+            if repo_path != '.':
+                self._prepare_pytest_env(repo_path)
+
+            # 7. 构建并执行pytest命令
+            # Allure结果目录按execution隔离，避免同一容器并发执行时互相清结果
+            result_dir_name = f'result_{self.execution.id}' if self.execution else 'result'
+            relative_script = self._relative_script_path(script_path, repo_path if repo_path != '.' else None)
+            report_dir = f"{repo_path}/{result_dir_name}"
+            junit_xml = f"{repo_path}/junit_{result_dir_name}.xml"
+
+            exec_inner = (
+                'cd ' + shlex.quote(repo_path)
+                + ' && export PYTHONPATH=' + shlex.quote(repo_path)
+                + ' && python -m pytest ' + shlex.quote(relative_script)
+                + ' --alluredir=' + shlex.quote(report_dir)
+                + ' --clean-alluredir'
+                + ' --junitxml=' + shlex.quote(junit_xml)
+                + ' --rootdir=' + shlex.quote(repo_path)
+                + ' --override-ini=rootdir=' + shlex.quote(repo_path)
+                + ' -v'
+            )
+            self._log_info(f"执行命令: {exec_inner}", context={'execution_command': exec_inner})
+
+            success, stdout, stderr = docker_service.execute_in_container(exec_inner)
+            if not success:
+                error_message = stdout if stdout else (stderr if stderr else '未知错误')
+                # 失败也要尝试解析junitxml（部分用例已执行完）
+                self._collect_test_summary(junit_xml)
+                return False, error_message, stderr
+
+            # 8. 解析junitxml用例统计
+            self._collect_test_summary(junit_xml)
+
+            # 9. 确认Allure结果已生成（仅记录，不阻断）
+            success, stdout, stderr = docker_service.exec_in_container('ls ' + shlex.quote(report_dir))
+            if not success:
+                self._log_warning(f"Allure结果目录不存在: {report_dir}",
+                                  context={'report_dir': report_dir, 'error': stderr})
+
+            return True, stdout, stderr
+        finally:
+            docker_service.close()
+
+    def _collect_test_summary(self, junit_xml_path):
+        """拉取并解析容器内的junitxml，把用例统计写到execution.test_summary"""
+        if not self.execution:
+            return
+        import json
+        import xml.etree.ElementTree as ET
+
+        success, xml_content, stderr = self.docker_service.exec_in_container(
+            'cat ' + shlex.quote(junit_xml_path))
+        if not success or not xml_content.strip():
+            self._log_warning(f"junitxml不存在，跳过用例统计: {junit_xml_path}",
+                              context={'junit_path': junit_xml_path, 'error': stderr})
+            return
+
+        try:
+            root = ET.fromstring(xml_content)
+            suites = root.findall('.//testsuite')
+            if not suites:
+                return
+            summary = {
+                'total': sum(int(s.get('tests', 0)) for s in suites),
+                'failed': sum(int(s.get('failures', 0)) for s in suites),
+                'errors': sum(int(s.get('errors', 0)) for s in suites),
+                'skipped': sum(int(s.get('skipped', 0)) for s in suites),
+                'time': round(sum(float(s.get('time', 0)) for s in suites), 3),
+            }
+            summary['passed'] = summary['total'] - summary['failed'] - summary['errors'] - summary['skipped']
+
+            # ORM直写，避免依赖调用方save顺序
+            from .models import ExecutionHistory
+            ExecutionHistory.objects.filter(id=self.execution.id).update(test_summary=summary)
+            self._log_info(f"用例统计: {json.dumps(summary, ensure_ascii=False)}",
+                           context={'test_summary': summary})
+        except ET.ParseError as e:
+            self._log_warning(f"junitxml解析失败: {e}",
+                              context={'junit_path': junit_xml_path})
+
+
+def execute_task_on_remote(task, environment, execution=None):
+    """在远程执行机上执行任务（兼容旧调用入口）"""
+    executor = TaskExecutor(environment, execution=execution)
+    return executor.execute(task)

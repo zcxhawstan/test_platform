@@ -10,7 +10,10 @@ from .serializers import (
 )
 from utils.response import APIResponse
 from utils.permissions import IsAdminUser
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class EnvironmentViewSet(viewsets.ModelViewSet):
@@ -182,26 +185,23 @@ class AutomationTaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):
         """执行任务"""
-        # 调试日志
-        print("execute called, pk=" + str(pk) + ", user=" + str(request.user) + ", auth=" + str(request.auth))
         task = self.get_object()
         from .tasks import execute_automation_task
-        
+
         # 检查任务是否已经在执行中
         if task.status == 'running':
             return APIResponse.error(message='任务正在执行中，不能重复执行')
-        
+
         try:
             # 尝试异步执行任务（任务内的分布式锁+状态CAS保证不重复执行；
             # 这里的检查只是快速反馈，真正的互斥在worker侧）
             result = execute_automation_task.delay(task.id, request.user.id)
-            print("异步任务已提交，任务ID: " + str(result.id))
+            logger.info('异步任务已提交，celery任务ID: %s', result.id)
             return APIResponse.success(message='任务执行已启动', data={'task_id': result.id})
         except Exception as e:
             # broker不可用时不再回退同步执行：
             # 同步回退会在web进程内长时间阻塞worker，且绕开分布式锁的部署假设
-            import traceback
-            traceback.print_exc()
+            logger.exception('异步任务提交失败')
             return APIResponse.error(message='启动任务失败（请检查Celery worker是否运行）: ' + str(e))
     
     @action(detail=True, methods=['post'])
@@ -285,7 +285,7 @@ class ExecutionHistoryViewSet(viewsets.ModelViewSet):
                     import shutil
                     shutil.rmtree(report.report_path)
                 except Exception as e:
-                    print(f"删除报告文件失败: {str(e)}")
+                    logger.warning("删除报告文件失败: %s", e)
             report.delete()
         
         # 删除执行历史
@@ -336,7 +336,7 @@ class ExecutionHistoryViewSet(viewsets.ModelViewSet):
                             import shutil
                             shutil.rmtree(report.report_path)
                         except Exception as e:
-                            print(f"删除报告文件失败: {str(e)}")
+                            logger.warning("删除报告文件失败: %s", e)
                     report.delete()
                 
                 # 删除执行历史

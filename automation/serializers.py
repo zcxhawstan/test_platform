@@ -101,7 +101,7 @@ class ExecutionHistorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ExecutionHistory
-        fields = ['id', 'task', 'task_name', 'environment', 'environment_name', 'executor', 'executor_username', 'status', 'start_time', 'end_time', 'duration', 'exit_code', 'created_at']
+        fields = ['id', 'task', 'task_name', 'environment', 'environment_name', 'executor', 'executor_username', 'status', 'start_time', 'end_time', 'duration', 'exit_code', 'test_summary', 'created_at']
         read_only_fields = ['id', 'executor', 'start_time', 'end_time', 'duration', 'exit_code', 'created_at']
 
 
