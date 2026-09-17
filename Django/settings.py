@@ -143,6 +143,10 @@ USE_TZ = True
 
 # 静态文件
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# 前端构建产物目录（npm run build 输出），Django直接托管
+FRONTEND_DIST = os.path.join(BASE_DIR, 'frontend', 'dist')
+STATICFILES_DIRS = [FRONTEND_DIST] if os.path.isdir(FRONTEND_DIST) else []
 
 # 媒体文件
 MEDIA_URL = '/media/'
