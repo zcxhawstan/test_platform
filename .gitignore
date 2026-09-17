@@ -226,3 +226,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Celery beat 本地调度状态文件（运行时产物）
+celerybeat-schedule.*

@@ -192,26 +192,17 @@ class AutomationTaskViewSet(viewsets.ModelViewSet):
             return APIResponse.error(message='任务正在执行中，不能重复执行')
         
         try:
-            # 尝试异步执行任务
+            # 尝试异步执行任务（任务内的分布式锁+状态CAS保证不重复执行；
+            # 这里的检查只是快速反馈，真正的互斥在worker侧）
             result = execute_automation_task.delay(task.id, request.user.id)
             print("异步任务已提交，任务ID: " + str(result.id))
             return APIResponse.success(message='任务执行已启动', data={'task_id': result.id})
         except Exception as e:
-            # 如果异步执行失败，回退到同步执行
+            # broker不可用时不再回退同步执行：
+            # 同步回退会在web进程内长时间阻塞worker，且绕开分布式锁的部署假设
             import traceback
-            error_msg = "异步执行失败，回退到同步执行: " + str(e)
-            print(error_msg)
             traceback.print_exc()
-            
-            try:
-                # 尝试同步执行
-                execute_automation_task(task.id, request.user.id)
-                return APIResponse.success(message='任务执行已启动（同步模式）')
-            except Exception as sync_error:
-                error_msg = "同步执行也失败: " + str(sync_error)
-                print(error_msg)
-                traceback.print_exc()
-                return APIResponse.error(message='启动任务失败: ' + str(sync_error))
+            return APIResponse.error(message='启动任务失败（请检查Celery worker是否运行）: ' + str(e))
     
     @action(detail=True, methods=['post'])
     def stop(self, request, pk=None):

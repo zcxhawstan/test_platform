@@ -83,22 +83,39 @@ TEMPLATES = [
 WSGI_APPLICATION = 'Django.wsgi.application'
 
 # 数据库配置
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# 通过 DB_* 环境变量切换 MySQL；未配置时默认 sqlite（本地开发）
+if os.environ.get('DB_ENGINE') == 'django.db.backends.mysql':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get('DB_NAME', 'test_platform'),
+            'USER': os.environ.get('DB_USER', 'root'),
+            'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+            'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
+            'PORT': os.environ.get('DB_PORT', '3306'),
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+            },
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # 缓存配置 (使用Redis数据库0)
+# 注意：Django内置RedisCache不支持OPTIONS里的django-redis参数，密码写在URL中
+_redis_host = os.environ.get('REDIS_HOST', '192.168.3.100')
+_redis_port = os.environ.get('REDIS_PORT', '6379')
+_redis_password = os.environ.get('REDIS_PASSWORD', '')
+_redis_auth = f':{_redis_password}@' if _redis_password else ''
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': f"redis://{os.environ.get('REDIS_HOST', '192.168.3.100')}:{os.environ.get('REDIS_PORT', '6379')}/{os.environ.get('REDIS_DB_CACHE', '0')}",
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PASSWORD': os.environ.get('REDIS_PASSWORD', ''),
-        }
+        'LOCATION': f"redis://{_redis_auth}{_redis_host}:{_redis_port}/{os.environ.get('REDIS_DB_CACHE', '0')}",
     }
 }
 

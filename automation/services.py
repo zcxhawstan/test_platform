@@ -622,7 +622,8 @@ def execute_task_on_remote(task, environment, execution=None):
                 # 如果是Git任务，列出仓库目录内容以帮助调试
                 if task.script_source == 'git' and repo_path:
                     # 在容器内查找Python文件
-                    list_repo_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('find ' + repo_path + ' -type f -name "*.py" | head -20')}"
+                    find_cmd_inner = 'find ' + repo_path + ' -type f -name "*.py" | head -20'
+                    list_repo_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(find_cmd_inner)}"
                     _, list_stdout, _ = docker_service.ssh_service.execute_command(list_repo_cmd)
                     log_info(f"容器内仓库中的Python文件: {list_stdout}", context={'repo_path': repo_path, 'python_files': list_stdout[:200]})
                     # 列出脚本路径的父目录
@@ -663,7 +664,8 @@ def execute_task_on_remote(task, environment, execution=None):
             current_hash = hash_out.split()[0] if success and hash_out.strip() and 'no_hash' not in hash_out else "unknown"
 
             # 读取上次安装的哈希值
-            read_hash_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cat ' + hash_file_path + ' 2>/dev/null || echo \"\"')}"
+            read_hash_inner = 'cat ' + hash_file_path + ' 2>/dev/null || echo ""'
+            read_hash_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(read_hash_inner)}"
             success, last_hash_out, last_hash_err = docker_service.ssh_service.execute_command(read_hash_cmd)
             last_hash = last_hash_out.strip() if success else ""
             
@@ -735,8 +737,10 @@ class CommandExecutor:
         create_core_dir_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('mkdir -p ' + core_dir)}"
 
         # 使用echo命令的不同格式来避免引号冲突
-        create_logger_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cat > ' + logger_py + ' << EOF\n' + logger_content + '\nEOF')}"
-        create_executor_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('cat > ' + command_executor_py + ' << EOF\n' + executor_content + '\nEOF')}"
+        create_logger_inner = 'cat > ' + logger_py + ' << EOF\n' + logger_content + '\nEOF'
+        create_logger_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(create_logger_inner)}"
+        create_executor_inner = 'cat > ' + command_executor_py + ' << EOF\n' + executor_content + '\nEOF'
+        create_executor_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(create_executor_inner)}"
         
         # 执行命令
         success, create_stdout, create_stderr = docker_service.ssh_service.execute_command(create_core_dir_cmd)
@@ -765,7 +769,8 @@ class CommandExecutor:
         else:
             log_error(f"脚本文件不存在: {debug_err2}", context={'script_path': script_path, 'error': debug_err2})
             
-        debug_cmd3 = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('find ' + repo_path + ' -name "*.py" | head -5')}"
+        find_cmd_inner = 'find ' + repo_path + ' -name "*.py" | head -5'
+        debug_cmd3 = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(find_cmd_inner)}"
         success, debug_out3, debug_err3 = docker_service.ssh_service.execute_command(debug_cmd3)
         if success:
             log_info(f"仓库内Python文件: {debug_out3}", context={'repo_path': repo_path, 'python_files': debug_out3[:200]})
@@ -806,7 +811,8 @@ class CommandExecutor:
 
         # 确保在仓库根目录创建pytest.ini文件，设置正确的rootdir
         pytest_ini_path = f"{repo_path}/pytest.ini"
-        create_pytest_ini_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('printf \"[pytest]\\nrootdir = .\" > ' + pytest_ini_path)}"
+        create_pytest_ini_inner = 'printf "[pytest]\\nrootdir = ." > ' + pytest_ini_path
+        create_pytest_ini_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(create_pytest_ini_inner)}"
         success, create_out, create_err = docker_service.ssh_service.execute_command(create_pytest_ini_cmd)
         if success:
             log_info(f"已创建pytest.ini文件: {pytest_ini_path}", context={'pytest_ini_path': pytest_ini_path})
@@ -837,7 +843,9 @@ class CommandExecutor:
             log_warning(f"无法验证pytest.ini文件: {verify_err}", context={'pytest_ini_path': pytest_ini_path, 'error': verify_err})
 
         # 构建详细的执行命令，添加-v选项获取更详细的输出
-        execution_command = f"cd {shlex.quote(repo_path)} && export PYTHONPATH={shlex.quote(repo_path)} && python -m pytest {shlex.quote(relative_script_path)} --alluredir=./result --clean-alluredir --rootdir={shlex.quote(repo_path)} --override-ini=rootdir={shlex.quote(repo_path)} -v"
+        # Allure结果目录按execution隔离，避免同一容器并发执行时 --clean-alluredir 互相清掉结果
+        remote_result_dir_name = f'result_{execution.id}' if execution else 'result'
+        execution_command = f"cd {shlex.quote(repo_path)} && export PYTHONPATH={shlex.quote(repo_path)} && python -m pytest {shlex.quote(relative_script_path)} --alluredir={shlex.quote('./' + remote_result_dir_name)} --clean-alluredir --rootdir={shlex.quote(repo_path)} --override-ini=rootdir={shlex.quote(repo_path)} -v"
         
         # 添加调试信息：直接尝试导入测试文件
         log_info("开始执行调试导入命令", context={'repo_path': repo_path})
@@ -874,7 +882,8 @@ class CommandExecutor:
         
         # 检查test_cases目录是否有__init__.py文件
         log_info("检查test_cases目录是否有__init__.py文件", context={'repo_path': repo_path})
-        check_init_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + repo_path + '/test_cases/__init__.py 2>/dev/null || echo \"No __init__.py file\"')}"
+        check_init_inner = 'ls -la ' + repo_path + '/test_cases/__init__.py 2>/dev/null || echo "No __init__.py file"'
+        check_init_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(check_init_inner)}"
         success, init_stdout, init_stderr = docker_service.ssh_service.execute_command(check_init_cmd)
         if success:
             log_info(f"test_cases目录__init__.py文件检查: {init_stdout}", context={'init_stdout': init_stdout})
@@ -892,7 +901,8 @@ class CommandExecutor:
         
         # 检查system_test目录是否有__init__.py文件
         log_info("检查system_test目录是否有__init__.py文件", context={'repo_path': repo_path})
-        check_system_test_init_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + repo_path + '/test_cases/system_test/__init__.py 2>/dev/null || echo \"No __init__.py file\"')}"
+        check_system_test_init_inner = 'ls -la ' + repo_path + '/test_cases/system_test/__init__.py 2>/dev/null || echo "No __init__.py file"'
+        check_system_test_init_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote(check_system_test_init_inner)}"
         success, system_test_init_stdout, system_test_init_stderr = docker_service.ssh_service.execute_command(check_system_test_init_cmd)
         if success:
             log_info(f"system_test目录__init__.py文件检查: {system_test_init_stdout}", context={'system_test_init_stdout': system_test_init_stdout})
@@ -942,7 +952,7 @@ class CommandExecutor:
             return False, error_message, stderr
 
         # 收集Allure报告
-        report_dir = f"{repo_path}/result"
+        report_dir = f"{repo_path}/{remote_result_dir_name}"
         check_report_cmd = f"docker exec {shlex.quote(container_name)} bash -c {shlex.quote('ls -la ' + report_dir)}"
         docker_service.ssh_service.execute_command(check_report_cmd)
         

@@ -18,9 +18,8 @@ User = get_user_model()
 
 import traceback
 
-# 全局字典，用于存储正在执行的任务进程
+# 全局字典，用于存储正在执行的任务进程（仅本进程内的本地进程管理，非互斥用途）
 task_processes = {}
-task_locks = {}
 stop_flags = {}  # 用于标记任务是否需要停止
 
 def log_with_context(execution, level, message, exception=None, context=None):
@@ -69,17 +68,28 @@ def log_warning_with_context(execution, message, context=None):
     """记录警告日志（带上下文）"""
     log_with_context(execution, 'WARNING', message, context=context)
 
-def acquire_task_lock(task_id):
-    """获取任务执行锁"""
-    if task_id in task_locks:
-        return False
-    task_locks[task_id] = True
-    return True
+def acquire_task_lock(task_id, ttl_seconds=7200):
+    """获取任务分布式锁（Redis SET NX EX，跨worker进程互斥）
+
+    ttl 防止worker崩溃后死锁；到期自动释放。
+    Redis不可用时抛异常——锁失效宁可拒绝执行也不能放任并发。
+    """
+    from django.core.cache import cache
+    key = f'automation:task_lock:{task_id}'
+    added = cache.add(key, '1', timeout=ttl_seconds)
+    return bool(added)
 
 def release_task_lock(task_id):
-    """释放任务执行锁"""
-    if task_id in task_locks:
-        del task_locks[task_id]
+    """释放任务分布式锁"""
+    from django.core.cache import cache
+    cache.delete(f'automation:task_lock:{task_id}')
+
+def refresh_task_lock(task_id, ttl_seconds=7200):
+    """续期任务锁（长任务执行期间防止锁过期被其他worker抢占）"""
+    from django.core.cache import cache
+    key = f'automation:task_lock:{task_id}'
+    if cache.get(key) is not None:
+        cache.touch(key, ttl_seconds)
 
 def set_stop_flag(task_id):
     """设置停止标志"""
@@ -116,22 +126,28 @@ def execute_automation_task(self, task_id, user_id):
     task = None
     
     try:
-        # 1. 检查任务执行锁
-        if not acquire_task_lock(task_id):
-            return {'status': 'failed', 'message': '任务正在执行中，请等待上一次执行完成'}
-        
-        # 获取任务和用户
+        # 1. 获取任务分布式锁（TTL=任务超时+10分钟buffer，防worker崩溃死锁）
         task = AutomationTask.objects.get(id=task_id)
+        lock_ttl = (task.timeout or 1800) + 600
+        try:
+            locked = acquire_task_lock(task_id, ttl_seconds=lock_ttl)
+        except Exception as e:
+            return {'status': 'failed', 'message': f'任务锁服务不可用，拒绝执行: {e}'}
+        if not locked:
+            return {'status': 'failed', 'message': '任务正在执行中，请等待上一次执行完成'}
+
         user = User.objects.get(id=user_id)
-        
-        # 2. 检查任务是否已经在执行中
-        if task.status == 'running':
+
+        # 2. CAS原子抢占状态：仅当任务不在running时置为running，防止并发执行
+        claimed = AutomationTask.objects.filter(
+            id=task_id
+        ).exclude(
+            status='running'
+        ).update(status='running', updated_at=timezone.now())
+        if not claimed:
             release_task_lock(task_id)
             return {'status': 'failed', 'message': '任务正在执行中，不能重复执行'}
-        
-        # 3. 更新任务状态为执行中
-        task.status = 'running'
-        task.save()
+        task.refresh_from_db()
         
         # 4. 创建执行历史记录
         execution = ExecutionHistory.objects.create(
@@ -166,11 +182,13 @@ def execute_automation_task(self, task_id, user_id):
         )
         
         # 7. 构建执行命令（script_path已通过serializer白名单校验，仍做quote防御）
+        # Allure结果目录按execution隔离，避免并发执行互相覆盖
         script_path = task.script_path
-        execution_command = f"pytest {shlex.quote(script_path)} --alluredir=./result --clean-alluredir -v"
+        local_result_dir = f'./result_{execution.id}'
+        execution_command = f"pytest {shlex.quote(script_path)} --alluredir={shlex.quote(local_result_dir)} --clean-alluredir -v"
         # 本地执行用列表参数（不走shell），杜绝注入面
         execution_command_args = [sys.executable, '-m', 'pytest', script_path,
-                                  '--alluredir=./result', '--clean-alluredir', '-v']
+                                  f'--alluredir={local_result_dir}', '--clean-alluredir', '-v']
         
         # 设置执行环境
         env = os.environ.copy()
@@ -339,9 +357,10 @@ def execute_automation_task(self, task_id, user_id):
         execution.exit_code = exit_code
         execution.save()
         
-        # 12. 更新任务状态
-        task.status = final_status
-        task.save()
+        # 12. 更新任务状态（CAS：仅running可流转到终态，防止覆盖stop请求或并发执行的结果）
+        AutomationTask.objects.filter(
+            id=task_id, status='running'
+        ).update(status=final_status, updated_at=timezone.now())
         
         # 13. 生成Allure报告（如果启用）
         if task.enable_allure and final_status == 'success':
@@ -375,8 +394,10 @@ def execute_automation_task(self, task_id, user_id):
             execution.save()
         
         if task:
-            task.status = 'error'
-            task.save()
+            # CAS：若任务已被并发置为stopped等状态则不覆盖
+            AutomationTask.objects.filter(
+                id=task_id, status='running'
+            ).update(status='error', updated_at=timezone.now())
         
         return {'status': 'error', 'message': str(e)}
     
@@ -448,10 +469,11 @@ def stop_automation_task(task_id, user_id):
                 context={'duration': execution.duration}
             )
         
-        # 更新任务状态
-        task.status = 'stopped'
-        task.save()
-        
+        # 更新任务状态（CAS：仅running状态可置为stopped，避免覆盖其他worker刚写入的终态）
+        AutomationTask.objects.filter(
+            id=task_id, status='running'
+        ).update(status='stopped', updated_at=timezone.now())
+
         # 释放锁
         release_task_lock(task_id)
         clear_stop_flag(task_id)
@@ -495,9 +517,9 @@ def generate_allure_report(execution_id):
                 context={'executor_ip': environment.executor_ip, 'execution_id': execution_id}
             )
             
-            # 构建远程Allure结果目录路径
+            # 构建远程Allure结果目录路径（按execution隔离，与services.py执行时的alluredir一致）
             repo_name = task.git_repo.split('/')[-1].replace('.git', '') if task.git_repo else 'Auto_Test'
-            remote_result_dir = f'/opt/automation/repos/{repo_name}/result'
+            remote_result_dir = f'/opt/automation/repos/{repo_name}/result_{execution.id}'
             
             # 连接到远程执行机
             from .services import SSHService
@@ -598,8 +620,8 @@ def generate_allure_report(execution_id):
                     context={'executor_ip': environment.executor_ip}
                 )
         else:
-            # 本地执行，直接使用本地Allure结果
-            result_dir = 'result'
+            # 本地执行，直接使用本地Allure结果（按execution隔离的目录）
+            result_dir = f'result_{execution.id}'
             if os.path.exists(result_dir):
                 # 执行Allure命令生成报告
                 subprocess.run(
