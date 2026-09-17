@@ -9,6 +9,7 @@ from .serializers import (
     EnvironmentSerializer, ReportSerializer, LogSerializer
 )
 from utils.response import APIResponse
+from utils.permissions import IsAdminUser
 import os
 
 
@@ -86,9 +87,12 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
                 data={'is_connected': False, 'message': str(e)}
             )
     
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[IsAdminUser])
     def test_ssh(self, request):
-        """测试SSH连接（针对新增环境时的临时配置测试）"""
+        """测试SSH连接（针对新增环境时的临时配置测试）
+
+        仅管理员可用：该接口可用任意IP/账号密码发起连接，普通用户可用会被用作内网探测跳板。
+        """
         from .services import SSHService
         
         data = request.data

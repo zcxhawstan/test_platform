@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from utils.crypto import decrypt_value
 
 User = get_user_model()
 
@@ -22,7 +23,8 @@ class Environment(models.Model):
     executor_ip = models.CharField(max_length=50, blank=True, null=True, verbose_name='执行机IP')
     executor_port = models.IntegerField(default=22, verbose_name='SSH端口')
     executor_username = models.CharField(max_length=50, blank=True, null=True, verbose_name='SSH用户名')
-    executor_password = models.CharField(max_length=100, blank=True, null=True, verbose_name='SSH密码')
+    # Fernet密文比明文长约57字符，256可容纳约200字符明文
+    executor_password = models.CharField(max_length=256, blank=True, null=True, verbose_name='SSH密码')
     
     # Docker配置
     docker_image = models.CharField(max_length=200, default='python:3.11', verbose_name='Docker镜像')
@@ -44,6 +46,10 @@ class Environment(models.Model):
     
     def __str__(self):
         return self.name
+
+    def get_executor_password(self):
+        """获取执行机密码明文（存储为Fernet密文，兼容历史明文数据）"""
+        return decrypt_value(self.executor_password)
 
 
 class AutomationTask(models.Model):

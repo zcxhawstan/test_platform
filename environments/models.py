@@ -29,7 +29,8 @@ class Environment(models.Model):
     port = models.IntegerField(verbose_name='端口号')
     database_name = models.CharField(max_length=100, verbose_name='数据库名称')
     database_user = models.CharField(max_length=100, verbose_name='数据库用户')
-    database_password = models.CharField(max_length=200, verbose_name='数据库密码')
+    # Fernet密文比明文长约57字符，300可容纳约240字符明文
+    database_password = models.CharField(max_length=300, verbose_name='数据库密码')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', verbose_name='状态')
     config = models.JSONField(default=dict, verbose_name='环境配置')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='environments', verbose_name='创建人')

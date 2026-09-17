@@ -1,6 +1,8 @@
 from celery import shared_task
 import subprocess
 import os
+import shlex
+import sys
 import time
 import json
 import signal
@@ -163,9 +165,12 @@ def execute_automation_task(self, task_id, user_id):
             context={'timeout': timeout_seconds}
         )
         
-        # 7. 构建执行命令
+        # 7. 构建执行命令（script_path已通过serializer白名单校验，仍做quote防御）
         script_path = task.script_path
-        execution_command = f"pytest {script_path} --alluredir=./result --clean-alluredir -v"
+        execution_command = f"pytest {shlex.quote(script_path)} --alluredir=./result --clean-alluredir -v"
+        # 本地执行用列表参数（不走shell），杜绝注入面
+        execution_command_args = [sys.executable, '-m', 'pytest', script_path,
+                                  '--alluredir=./result', '--clean-alluredir', '-v']
         
         # 设置执行环境
         env = os.environ.copy()
@@ -230,8 +235,8 @@ def execute_automation_task(self, task_id, user_id):
                 )
                 
                 process = subprocess.Popen(
-                    execution_command,
-                    shell=True,
+                    execution_command_args,
+                    shell=False,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -501,17 +506,17 @@ def generate_allure_report(execution_id):
             if ssh_service.connect():
                 try:
                     # 检查远程Allure结果目录是否存在
-                    check_cmd = f'ls -la {remote_result_dir}'
+                    check_cmd = f'ls -la {shlex.quote(remote_result_dir)}'
                     success, stdout, stderr = ssh_service.execute_command(check_cmd)
-                    
+
                     if success and 'No such file or directory' not in stderr:
                         # 压缩远程Allure结果
                         remote_zip = f'allure_result_{execution.id}.zip'
                         # 在Docker容器中执行zip命令，这样只会压缩本次执行的结果
                         container_name = f'automation-{execution.environment.id}'
-                        zip_cmd = f'docker exec {container_name} bash -c "cd {remote_result_dir} && zip -r {remote_zip} ."'
+                        zip_cmd = f'docker exec {shlex.quote(container_name)} bash -c {shlex.quote("cd " + remote_result_dir + " && zip -r " + remote_zip + " .")}'
                         success, stdout, stderr = ssh_service.execute_command(zip_cmd)
-                        
+
                         if success:
                             # 下载压缩文件到本地
                             import tempfile
@@ -522,7 +527,7 @@ def generate_allure_report(execution_id):
                                 from scp import SCPClient
                                 scp = SCPClient(ssh_service.client.get_transport())
                                 # 从容器中复制文件到宿主机
-                                copy_cmd = f'docker cp {container_name}:{remote_result_dir}/{remote_zip} {remote_result_dir}/'
+                                copy_cmd = f'docker cp {shlex.quote(container_name + ":" + remote_result_dir + "/" + remote_zip)} {shlex.quote(remote_result_dir + "/")}'
                                 success_copy, stdout_copy, stderr_copy = ssh_service.execute_command(copy_cmd)
                                 if success_copy:
                                     # 从宿主机下载文件
@@ -530,22 +535,21 @@ def generate_allure_report(execution_id):
                                 else:
                                     raise Exception(f'从容器复制文件失败: {stderr_copy}')
                                 scp.close()
-                                
+
                                 # 解压到本地临时目录
                                 import zipfile
                                 with zipfile.ZipFile(local_zip, 'r') as zip_ref:
                                     zip_ref.extractall(temp_dir)
-                                
+
                                 # 执行Allure命令生成报告
                                 subprocess.run(
-                                    f'allure generate {temp_dir} -o {report_dir} --clean',
-                                    shell=True,
+                                    ['allure', 'generate', temp_dir, '-o', report_dir, '--clean'],
                                     capture_output=True,
                                     text=True
                                 )
-                            
+
                             # 删除远程临时文件
-                            ssh_service.execute_command(f'rm -f {remote_result_dir}/{remote_zip}')
+                            ssh_service.execute_command(f'rm -f {shlex.quote(remote_result_dir + "/" + remote_zip)}')
                             
                             # 创建报告记录
                             report = Report.objects.create(
@@ -599,8 +603,7 @@ def generate_allure_report(execution_id):
             if os.path.exists(result_dir):
                 # 执行Allure命令生成报告
                 subprocess.run(
-                    f'allure generate {result_dir} -o {report_dir} --clean',
-                    shell=True,
+                    ['allure', 'generate', result_dir, '-o', report_dir, '--clean'],
                     capture_output=True,
                     text=True
                 )

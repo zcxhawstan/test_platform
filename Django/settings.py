@@ -11,11 +11,20 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-8!67b^9z#^4=ps5yd-aq2!j03h)47kvxvrbqm0h*!v66&p9(pf')
-
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
+if DEBUG:
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-8!67b^9z#^4=ps5yd-aq2!j03h)47kvxvrbqm0h*!v66&p9(pf')
+    ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
+else:
+    # 生产环境强制要求环境变量，缺失即拒绝启动，避免弱密钥/任意主机被访问
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    if not SECRET_KEY:
+        raise RuntimeError('生产环境(DEBUG=False)必须通过环境变量 SECRET_KEY 提供密钥')
+    _hosts = os.environ.get('ALLOWED_HOSTS', '').strip()
+    if not _hosts or _hosts == '*':
+        raise RuntimeError('生产环境(DEBUG=False)必须通过环境变量 ALLOWED_HOSTS 提供明确的域名/IP列表（禁止 *）')
+    ALLOWED_HOSTS = [h.strip() for h in _hosts.split(',') if h.strip()]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -48,7 +57,6 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'utils.csrf_middleware.CsrfExemptMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -150,8 +158,8 @@ CELERY_TASK_TIME_LIMIT = 7200
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        # 纯Token认证：/api/ 已全局豁免CSRF，不能再保留会话认证
         'rest_framework.authentication.TokenAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -160,7 +168,13 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 20,
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS 白名单：生产环境必须通过 CORS_ALLOWED_ORIGINS 配置明确的前端来源
+_cors_env = os.environ.get('CORS_ALLOWED_ORIGINS', '').strip()
+if _cors_env:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_env.split(',') if o.strip()]
+else:
+    # 未配置时仅放行本机开发环境
+    CORS_ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
 CORS_ALLOW_CREDENTIALS = True
 
 # 日志配置
