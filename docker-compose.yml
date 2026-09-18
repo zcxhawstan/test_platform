@@ -1,0 +1,97 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-test_platform}
+      MYSQL_USER: ${MYSQL_USER:-tpuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-TpUser@2026}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Root@2026}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u$$MYSQL_USER", "-p$$MYSQL_PASSWORD"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env.docker
+    environment:
+      DB_ENGINE: django.db.backends.mysql
+      DB_NAME: ${MYSQL_DATABASE:-test_platform}
+      DB_USER: ${MYSQL_USER:-tpuser}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-TpUser@2026}
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    volumes:
+      - media_data:/app/media
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env.docker
+    environment:
+      DB_ENGINE: django.db.backends.mysql
+      DB_NAME: ${MYSQL_DATABASE:-test_platform}
+      DB_USER: ${MYSQL_USER:-tpuser}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-TpUser@2026}
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    volumes:
+      - media_data:/app/media
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A Django worker --loglevel=info --concurrency=4
+
+  beat:
+    build: .
+    restart: unless-stopped
+    env_file: .env.docker
+    environment:
+      DB_ENGINE: django.db.backends.mysql
+      DB_NAME: ${MYSQL_DATABASE:-test_platform}
+      DB_USER: ${MYSQL_USER:-tpuser}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-TpUser@2026}
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    volumes:
+      - media_data:/app/media
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A Django beat --loglevel=info
+
+volumes:
+  mysql_data:
+  media_data:

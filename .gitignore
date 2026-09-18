@@ -229,3 +229,6 @@ __marimo__/
 
 # Celery beat 本地调度状态文件（运行时产物）
 celerybeat-schedule.*
+
+# Docker compose 运行时环境文件
+.env.docker
