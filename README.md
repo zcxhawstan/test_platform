@@ -42,23 +42,33 @@
 
 ## 快速开始
 
-### 后端启动
+### Docker Compose 一键部署（推荐）
+
+```bash
+cp .env.docker.example .env.docker   # 填入随机 SECRET_KEY / ENCRYPTION_KEY
+docker compose up -d --build
+# 访问 http://localhost:8000
+```
+
+详见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+
+### 本地开发
+
+#### 后端启动
 
 ```bash
 # 安装依赖（依赖清单以 requirements.txt 为准，pyproject.toml 与其同步）
 pip install -r requirements.txt
 
-# 激活虚拟环境
-.venv\Scripts\Activate.ps1
-
-# 启动Django服务
+# 启动Django服务（默认sqlite，无需外部数据库）
+python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 
 # 启动Celery Worker (使用solo pool避免Windows权限问题)
 .venv\Scripts\python.exe -m celery -A Django worker --loglevel=info --pool=solo
 ```
 
-### 前端启动
+#### 前端启动
 
 ```bash
 cd frontend
@@ -68,9 +78,6 @@ npm install
 
 # 启动开发服务器
 npm run dev
-
-# 构建生产版本
-npm run build
 ```
 
 ### 运行测试
@@ -86,8 +93,7 @@ allure serve allure-results
 
 ## 默认账号
 
-- 管理员: admin / admin123
-- 测试用户: tester1 / tester123
+- 管理员: 由环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 控制（默认 admin / Admin@2026，仅首次启动创建）
 
 ## 项目结构
 
@@ -104,20 +110,20 @@ Mytest_Platform/
 ├── logs/                 # 日志管理模块
 ├── utils/                # 工具类
 ├── tests/                # pytest测试用例
-├── scripts/              # 脚本文件
+├── scripts/              # 部署与运维脚本
 ├── frontend/             # Vue3前端项目
+├── docker/               # 容器启动入口脚本
 ├── manage.py
 ├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
 ├── README.md
-├── DEPLOYMENT.md
-└── DEPLOYMENT_GUIDE.md
+└── DEPLOYMENT.md
 ```
 
 ## 详细文档
 
-请查看以下文档获取详细信息：
-- [DEPLOYMENT.md](DEPLOYMENT.md) - 部署与启动指南
-- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - 详细部署指导
+- [DEPLOYMENT.md](DEPLOYMENT.md) - 部署指南（Docker Compose / WSL 裸机 / 开发模式）
 
 ## 许可证
 

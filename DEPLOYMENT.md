@@ -1,185 +1,179 @@
-# 测试平台部署与启动指南
+# 测试平台部署指南
 
-## 1. 环境配置
+本文档覆盖三种部署形态，按推荐程度排序：
 
-### 1.1 配置文件
-- **文件**: `.env`
-- **位置**: 项目根目录
-- **用途**: 存储环境变量配置
+| 部署方式 | 适用场景 | 前置依赖 |
+|---------|---------|---------|
+| [Docker Compose](#方式一docker-compose-部署推荐) | 快速部署、生产环境 | Docker Engine 24+ |
+| [WSL 裸机部署](#方式二wsl-裸机部署) | Windows 开发机上的长期运行 | WSL2 Ubuntu + Python 3.11 |
+| [开发模式](#方式三开发模式) | 本地开发调试 | Python 3.11+ / Node 18+ |
 
-### 1.2 Redis资源隔离配置
+---
 
-测试平台使用Redis进行资源隔离，通过不同的数据库编号实现：
+## 方式一：Docker Compose 部署（推荐）
 
-| 数据库编号 | 用途 | 配置项 |
-|---------|------|--------|
-| 0 | Django缓存 (Cache) | `CACHES` 配置 |
-| 1 | Celery消息代理 (Broker) | `CELERY_BROKER_URL` 配置 |
-| 2 | Celery结果后端 (Result Backend) | `CELERY_RESULT_BACKEND` 配置 |
+### 1.1 准备配置
 
-### 1.3 配置示例
-
-```env
-# Redis 配置
-REDIS_HOST=192.168.3.100
-REDIS_PORT=6379
-REDIS_PASSWORD=
-
-# Celery 配置 (使用上面的Redis配置)
-CELERY_BROKER_URL=redis://192.168.3.100:6379/1
-CELERY_RESULT_BACKEND=redis://192.168.3.100:6379/2
+```bash
+cp .env.docker.example .env.docker
 ```
 
-## 2. 服务启动
+编辑 `.env.docker`，**必须**修改以下两项（占位值会导致无法启动或数据不安全）：
 
-### 2.1 后端服务启动
+```bash
+# 生成 SECRET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(50))"
 
-#### 2.1.1 激活虚拟环境
-```powershell
-.venv\Scripts\Activate.ps1
+# 生成 ENCRYPTION_KEY（Fernet，用于执行机密码加密存储）
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-#### 2.1.2 启动Django服务
-```powershell
-python manage.py runserver 0.0.0.0:8000
-```
-- **默认地址**: http://0.0.0.0:8000
+其他可调整项：`MYSQL_PASSWORD`、`ADMIN_USERNAME/PASSWORD`（初始管理员）、`WEB_PORT`（对外端口，默认 8000）。
 
-#### 2.1.3 启动Celery Worker
-```powershell
-.venv\Scripts\python.exe -m celery -A Django worker --loglevel=info --pool=solo
-```
-- **注意**: 
-  - 使用`--pool=solo`参数避免Windows权限问题
-  - Celery worker会自动读取Django配置中的`CELERY_BROKER_URL`和`CELERY_RESULT_BACKEND`设置
-- **验证**: 启动时应显示连接到正确的Redis数据库
+### 1.2 启动
 
-### 2.2 前端服务启动
-
-#### 2.2.1 进入前端目录
-```powershell
-cd frontend
+```bash
+docker compose up -d --build
 ```
 
-#### 2.2.2 启动前端服务
-```powershell
-npm run dev
-```
-- **默认地址**: http://localhost:5173
+首次构建约 5-10 分钟（前端 npm 构建 + Python 依赖 + Allure 命令行）。容器自动完成：等数据库就绪 → `migrate` → 创建初始管理员 → 启动服务。
 
-## 3. 验证方法
+### 1.3 验证
 
-### 3.1 检查Redis连接
-```powershell
-python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=1); print('Redis Broker connection:', r.ping())"
-python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=2); print('Redis Result Backend connection:', r.ping())"
+```bash
+docker compose ps          # 五个服务全部 Up（mysql/redis 显示 healthy）
+curl -X POST http://localhost:8000/api/auth/users/login/ \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Admin@2026"}'   # 返回 200 + token
 ```
 
-### 3.2 检查Celery Worker状态
-- 启动Celery worker后，查看日志输出，确认：
-  - 连接到正确的Redis地址和数据库
-  - 成功注册了自动化任务
-  - 没有错误信息
+浏览器访问 `http://localhost:8000` 直接进入前端（Django 托管构建产物，无需单独起前端）。
 
-### 3.3 测试任务执行
-1. 通过前端界面或API创建并执行自动化测试任务
-2. 检查Celery worker日志，确认任务被接收和执行
-3. 检查执行历史，确认任务执行记录被创建
-4. 查看Allure报告，确认报告生成正确
+### 1.4 服务架构
 
-## 4. 故障排除
+| 服务 | 说明 |
+|------|------|
+| web | gunicorn × 3 workers，对外 8000 |
+| worker | celery worker（异步任务执行） |
+| beat | celery beat（定时任务调度） |
+| mysql | MySQL 8.4，数据持久化于 `mysql_data` 卷 |
+| redis | Redis 7，缓存/分布式锁/消息队列 |
 
-### 4.1 常见问题
+### 1.5 常用运维命令
 
-#### 4.1.1 Celery Worker无法接收到任务
-- **原因**: Redis连接问题或数据库编号配置错误
-- **解决**: 
-  - 检查Redis服务是否正常运行
-  - 验证`CELERY_BROKER_URL`配置是否正确
-  - 重启Celery worker
+```bash
+docker compose logs -f web        # 看服务日志
+docker compose restart web        # 重启单个服务
+docker compose down               # 停止（保留数据）
+docker compose down -v            # 停止并清空数据（危险）
+```
 
-#### 4.1.2 任务执行失败
-- **原因**: 测试文件不存在或导入错误
-- **解决**: 
-  - 检查测试文件路径是否正确
-  - 确保测试文件语法正确
-  - 检查依赖是否安装
+### 1.6 注意事项
 
-#### 4.1.3 Redis权限错误
-- **原因**: Windows系统权限限制
-- **解决**: 
-  - 以管理员身份运行终端
-  - 使用`--pool=solo`参数启动Celery worker
-  - 检查Redis服务权限设置
+- **`.env.docker` 不入库**（已 gitignore），密钥丢失 = 已存的执行机密码无法解密
+- 远程执行机场景：SSH 出口在 worker 容器内，执行机需允许来自容器网络的连接
+- 端口冲突：宿主机 8000 被占用时改 `.env.docker` 的 `WEB_PORT`
 
-#### 4.1.4 Allure报告统计错误
-- **原因**: 宿主机上的result目录包含历史执行结果
-- **解决**: 系统已自动修复，现在在Docker容器中执行zip命令
+---
 
-### 4.2 日志查看
+## 方式二：WSL 裸机部署
 
-#### 4.2.1 Django日志
-- **位置**: 终端输出
-- **内容**: API请求、错误信息
+适用于 Windows 开发机，用 `scripts/wsl_deploy.sh` 固化运维（实测环境：WSL2 Ubuntu 26.04）。
 
-#### 4.2.2 Celery Worker日志
-- **位置**: 终端输出
-- **内容**: 任务接收、执行过程、错误信息
+### 2.1 一次性初始化
 
-#### 4.2.3 执行历史日志
-- **路径**: 通过API访问 `/api/automation/executions/{id}/logs/`
-- **内容**: 任务执行详细日志
+```bash
+# WSL 内：装系统依赖（需要 sudo）
+sudo apt install -y mysql-server redis-server default-libmysqlclient-dev pkg-config openjdk-21-jre-headless
 
-## 5. 部署注意事项
+# 建库
+sudo mysql -uroot -e "CREATE DATABASE test_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; \
+  CREATE USER 'tpuser'@'localhost' IDENTIFIED BY 'TpUser@2026'; \
+  GRANT ALL PRIVILEGES ON test_platform.* TO 'tpuser'@'localhost'; FLUSH PRIVILEGES;"
 
-### 5.1 生产环境配置
-- 更改`DEBUG=False`
-- 生成新的`SECRET_KEY`
-- 使用正式的Redis服务
-- 配置合适的数据库连接
+# Python 虚拟环境 + 依赖
+python3.11 -m venv ~/test_platform_venv
+~/test_platform_venv/bin/pip install -r requirements.txt
 
-### 5.2 服务管理
-- 使用进程管理工具（如Supervisor）管理服务
-- 配置日志轮转
-- 设置监控和告警
+# 项目代码与 .env（DB_HOST=127.0.0.1，参考 .example）
+# migrate + 前端构建（npm ci && npm run build，dist 由 Django 自动托管）
+```
 
-### 5.3 性能优化
-- 调整Celery worker数量
-- 配置合适的任务超时时间
-- 优化Redis内存使用
+### 2.2 日常启停
 
-## 6. 命令速查
+```bash
+# Windows 侧直接调用
+wsl -d Ubuntu -- bash ~/test_platform_deploy/deploy.sh start    # 全量启动
+wsl -d Ubuntu -- bash ~/test_platform_deploy/deploy.sh status   # 状态 + API 健康检查
+wsl -d Ubuntu -- bash ~/test_platform_deploy/deploy.sh restart
+wsl -d Ubuntu -- bash ~/test_platform_deploy/deploy.sh stop
+```
 
-### 6.1 启动服务
-```powershell
-# 后端服务
-.venv\Scripts\Activate.ps1
+WSL 完全重启后 MySQL 需要手动 `sudo` 启动一次，其余服务脚本自动拉起。
+
+### 2.3 已知限制
+
+WSL 无 systemd：MySQL 用 `mysqld --daemonize` 直启，Redis 用 `service` 命令。
+
+---
+
+## 方式三：开发模式
+
+```bash
+# 后端（Windows 本地）
+pip install -r requirements.txt
+python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 
-# Celery Worker
-.venv\Scripts\Activate.ps1
-.venv\Scripts\python.exe -m celery -A Django worker --loglevel=info --pool=solo
+# Celery（Windows 需 --pool=solo）
+python -m celery -A Django worker --loglevel=info --pool=solo
 
-# 前端服务
-cd frontend
-npm run dev
+# 前端 dev server（API 自动代理到 8000）
+cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
-### 6.2 检查状态
-```powershell
-# 检查Redis连接
-python -c "import redis; r = redis.Redis(host='192.168.3.100', port=6379, db=1); print('Redis Broker connection:', r.ping())"
+开发模式默认 sqlite（`db.sqlite3`），无需 MySQL/Redis 即可起 Web（异步任务除外）。
 
-# 检查任务列表
-python -c "import requests; data = {'username': 'admin', 'password': 'admin123'}; login_response = requests.post('http://localhost:8000/api/auth/users/login/', json=data); if login_response.status_code == 200: token = login_response.json()['data']['token']; headers = {'Authorization': 'Token ' + token}; tasks_response = requests.get('http://localhost:8000/api/automation/tasks/', headers=headers); print('Tasks:', tasks_response.json())"
-```
+---
 
-## 7. 技术支持
+## 环境变量说明
 
-如果遇到问题，请检查以下内容：
-1. 环境配置是否正确
-2. Redis服务是否正常运行
-3. 服务启动命令是否正确
-4. 查看日志输出获取详细错误信息
+### 核心配置（.env / .env.docker 通用）
 
-如需进一步帮助，请提供详细的错误信息和操作步骤。
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `SECRET_KEY` | 生产必填 | Django 密钥，生产（DEBUG=False）缺失直接拒绝启动 |
+| `DEBUG` | 建议 False | 生产必须 False |
+| `ALLOWED_HOSTS` | 生产必填 | 域名/IP 列表，禁止 `*` |
+| `CORS_ALLOWED_ORIGINS` | 生产必填 | 前端来源白名单，逗号分隔 |
+| `ENCRYPTION_KEY` | 必填 | Fernet 密钥，加密执行机密码等敏感字段 |
+| `ADMIN_USERNAME/PASSWORD/EMAIL` | 可选 | 初始管理员（幂等创建） |
+
+### 数据库与 Redis
+
+| 变量 | 说明 |
+|------|------|
+| `DB_ENGINE` | `django.db.backends.mysql` 启用 MySQL；不设则用 sqlite |
+| `DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT` | MySQL 连接信息 |
+| `REDIS_HOST/PORT/PASSWORD` | Redis 连接（容器内 compose 自动注入主机名） |
+
+### Redis 库分配（资源隔离）
+
+| 库编号 | 用途 |
+|--------|------|
+| 0 | Django 缓存 + 任务分布式锁（`automation:task_lock:*`） |
+| 1 | Celery 消息代理（Broker） |
+| 2 | Celery 结果后端（Result Backend） |
+
+---
+
+## 故障排查
+
+| 现象 | 排查 |
+|------|------|
+| web 容器反复重启 | `docker compose logs web` 看初始化报错；多为数据库未就绪或 SECRET_KEY 缺失 |
+| 登录 401/400 | ADMIN_PASSWORD 未按 .env.docker 设置的值；或重新 up 后管理员已存在但密码变了 |
+| 任务一直排队不执行 | worker 未就绪；`docker compose logs worker` 确认 celery ready；Redis 不可达时任务拒绝执行（fail-closed 设计） |
+| 前端空白页 | 确认镜像构建包含 frontend/dist（多阶段构建产物）；Ctrl+F5 强刷 |
+| 端口冲突 | 改 `WEB_PORT`；WSL 裸机部署与容器部署共用 8000，二选一 |
+| mysqlclient 编译失败 | 缺 `default-libmysqlclient-dev pkg-config gcc`（镜像内已处理，裸机部署需自装） |

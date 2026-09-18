@@ -232,3 +232,6 @@ celerybeat-schedule.*
 
 # Docker compose 运行时环境文件
 .env.docker
+
+# 本地开发数据库（生产走 MySQL/Docker）
+db.sqlite3
